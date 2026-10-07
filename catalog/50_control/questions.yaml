@@ -1,0 +1,85 @@
+# Question kinds (ARCHITECTURE §5). The answer is a closed schema: field -> type; "?" = optional.
+# Adding, removing or relaxing a question is the owner's decision (P15).
+catalog: QuestionKind
+file_schema: 1
+rows:
+  - id: define_class
+    status: draft
+    actor: accountant
+    procedure: sorting
+    answer: {source_doc_id: slug}
+  - id: bon_cui_unclear
+    status: draft
+    actor: accountant
+    procedure: sorting
+    answer: {cu_cui: bool, fara_cui: bool}
+    note: Exactly one of the two is true.
+  - id: decont_split
+    status: draft
+    actor: accountant
+    procedure: sorting
+    answer: {parts: "list[{part_hash: sha256, source_doc_id: slug, kinds: list[slug], bon_our_cui_on_doc: bool?, counterparty_cui: cui?}]"}
+  - id: define_articol
+    status: draft
+    actor: accountant
+    procedure: document
+    answer: {articol_id: slug}
+  - id: v3_approve
+    status: draft
+    actor: accountant
+    procedure: document
+    answer: {decision: "enum(approve|reject|edit)", edit: "object?"}
+    note: edit carries a patch that must still validate as a document; approve and reject carry none.
+  - id: wait_validare
+    status: draft
+    actor: saga_agent
+    procedure: document
+    answer: {validated: bool, saga_doc_key: "str?"}
+    note: Accepted as validated only when SAGA's snapshot shows that key validated.
+  - id: need_rj_export
+    status: draft
+    actor: accountant
+    procedure: reconcile
+    answer: {export_id: slug}
+  - id: recon_ambiguous
+    status: draft
+    actor: accountant
+    procedure: reconcile
+    answer: {action: "enum(already_posted|override_absent)", sink_line_ids: "list[int]"}
+  - id: recon_review_contest
+    status: draft
+    actor: accountant
+    procedure: reconcile
+    answer: {action: "enum(already_posted|override_absent)"}
+  - id: recon_how_mismatch
+    status: draft
+    actor: accountant
+    procedure: reconcile
+    answer: {ack_mismatch: bool, open_storno: bool}
+    note: Exactly one of the two is true.
+  - id: v2_close
+    status: draft
+    actor: accountant
+    procedure: close
+    answer: {action: "enum(file|hold|patch_maps|reopen)", explained_rule: "slug?"}
+    note: file is refused while the month is material (P11).
+  - id: v4_codit
+    status: draft
+    actor: accountant
+    procedure: close
+    answer: {accept: bool, skip: bool, edit: "object?", seed_next: "object?"}
+  - id: explained_rule
+    status: draft
+    actor: accountant
+    procedure: close
+    answer: {rule_id: slug}
+  - id: control_disposition
+    status: draft
+    actor: accountant
+    procedure: close
+    answer: {control_id: slug, disposition: "enum(explained_rule|reopen|hold)", rule_id: "slug?"}
+  - id: filing_receipt
+    status: draft
+    actor: accountant
+    procedure: close
+    answer: {filing_id: slug, period: period, receipt_key: str, submitted_by: str}

@@ -1,0 +1,29 @@
+# Job kinds: the posting unit, one per source document, unique on (client CUI, source hash).
+catalog: JobKind
+file_schema: 1
+rows:
+  - id: ro_efactura
+    status: draft
+    source_docs: [ro_efactura_ubl]
+    articole: [ro_efactura_inbound, ro_efactura_outbound]
+  - id: storno
+    status: draft
+    storno: true
+    source_docs: [ro_efactura_ubl]
+    articole: [storno_intrare, storno_iesire]
+  - id: foreign_invoice
+    status: draft
+    source_docs: [foreign_invoice, foreign_invoice_xml]
+    articole: [foreign_invoice_inbound, foreign_invoice_outbound, foreign_rc_neplatitor]
+  - id: bon
+    status: draft
+    source_docs: [bon_fiscal]
+    articole: [bon_cu_cui, bon_fara_cui]
+  - id: extras
+    status: draft
+    source_docs: [extras, extras_pdf]
+    articole: [extras_statement]
+  - id: extras_line
+    status: draft
+    source_docs: [extras_statement_pdf]
+    articole: [extras_statement]

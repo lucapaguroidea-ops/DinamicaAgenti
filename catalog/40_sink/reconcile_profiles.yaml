@@ -1,0 +1,48 @@
+# PRE (is it already in the books?) and POST (how did SAGA post it?) profiles (ARCHITECTURE §4.3).
+catalog: ReconcileProfile
+file_schema: 1
+rows:
+  - id: pre_doc_nr_date
+    status: draft
+    stage: pre
+    match_keys: [number, date, gross]
+    number_levels: [exact, alnum, digits_core]
+    tolerance: "0.05"
+    fallback_accounts: ["401", "4111"]
+    review: true
+    note: digits_core counts only with the same partner CUI. Generous on purpose.
+  - id: pre_bon_date_gross
+    status: draft
+    stage: pre
+    match_keys: [date, gross]
+    tolerance: "0.05"
+    review: true
+  - id: pre_extras_date_gross
+    status: draft
+    stage: pre
+    match_keys: [date, gross]
+    tolerance: "0.05"
+    review: true
+  - id: post_doc_how
+    status: draft
+    stage: post
+    match_keys: [number, date]
+    number_levels: [exact, alnum, digits_core]
+    tolerance: "0.05"
+    require_all_accounts: false
+    fallback_accounts: ["401", "4111"]
+    note: Accounts by prefix; require_all_accounts [de confirmat] on a test firm.
+  - id: post_how_4428
+    status: draft
+    stage: post
+    match_keys: [number, date]
+    number_levels: [exact, alnum, digits_core]
+    tolerance: "0.05"
+    require_all_accounts: true
+    fallback_accounts: ["401", "4111", "4428"]
+    note: TVA la încasare; VAT stays on 4428 until settlement.
+  - id: post_bon_how
+    status: draft
+    stage: post
+    match_keys: [date, gross]
+    tolerance: "0.05"

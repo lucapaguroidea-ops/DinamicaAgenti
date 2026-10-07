@@ -36,8 +36,8 @@ documents (SPV zips, UBL XML, statement PDFs, expense reports)
 ## Where it stands (2026-10-07)
 
 Design and skeleton. The repository holds the principles, the architecture, the plan, the
-folder layout and the first pieces of the gate kit: the CUI check digit and the catalog loader
-with its row schemas. No catalog row, route or hank is written yet. Next: `BUILD.md`.
+folder layout, the first pieces of the gate kit (the CUI check digit, the catalog loader) and
+the catalog rows, all `draft`. No route or hank is written yet; no model is pinned (D3). Next: `BUILD.md`.
 
 ## Where things are
 

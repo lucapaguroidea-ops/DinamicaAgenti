@@ -146,6 +146,7 @@ class Filters(Closed):
     fiscal_class: Slug | None = None
     our_role: Literal["inbound", "outbound"] | None = None
     is_storno: bool | None = None
+    our_cui_on_doc: bool | None = None  # a fiscal receipt: is the client's CUI on it
 
 
 class ArticolReconcile(Closed):

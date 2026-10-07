@@ -1,0 +1,14 @@
+# Close kinds: one per client-month, chosen by the period's CO.DiT (ARCHITECTURE §4.4).
+catalog: CloseKind
+file_schema: 1
+rows:
+  - id: close_standard
+    status: draft
+    require: {tva: [tva_platitor, tva_neplatitor, tva_scutire_mici]}
+    forbid: {exig: [tva_la_incasare]}
+    recon_profile: post_doc_how
+  - id: close_tva_incasare
+    status: draft
+    require: {tva: [tva_platitor], exig: [tva_la_incasare]}
+    recon_profile: post_how_4428
+    watched_extra: ["4428"]
