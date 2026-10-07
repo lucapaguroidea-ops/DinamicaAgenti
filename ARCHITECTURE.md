@@ -275,6 +275,11 @@ per codon, and is run with `--max-cost` and `--max-time`. A hank never touches t
 
 One dossier per client, written only by the gate kit; outside this repository.
 
+Engine: **SQLite, one `store.db` per client** (owner, 2026-10-07, D1). The client boundary is the
+folder `dossiers/{cui}/`: records and files live behind the same boundary, a backup or restore
+touches one client only, and the only way in is a function that checks the CUI and opens that
+client's file. Every record still carries the CUI and is refused on a mismatch (P13).
+
 ```
 dossiers/{cui}/
   store.db                  unique keys and append-only logs

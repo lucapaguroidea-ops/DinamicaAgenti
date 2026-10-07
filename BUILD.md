@@ -15,7 +15,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-05 | done | WP-04 | Catalog rows: source documents, Job kinds, articole, mouths, reconcile profiles, close kinds, controls, filings, question kinds, model roles (`ARCHITECTURE.md` §4–§6) |
 | WP-06 | todo | WP-05 | Sorting in the kit: emit gates, Job kind, container split (`kit emit`) |
 | WP-07 | todo | WP-04, R3 | UBL reader, XML first (P6): CIUS-RO quoted in `RESEARCH_LOG.md` first |
-| WP-08 | todo | D1 | Dossier store: unique keys and append-only logs (`ARCHITECTURE.md` §7) |
+| WP-08 | todo | WP-04 | Dossier store: unique keys and append-only logs (`ARCHITECTURE.md` §7) |
 | WP-09 | todo | WP-07, WP-08 | PRE / POST matching and the settlement proposal |
 | WP-10 | todo | R4 | SAGA XML renderer: tags only from SAGA's manual or a test-firm import (P16) |
 | WP-11 | todo | WP-08 | Period difference and controls; materiality (P11) |
@@ -30,7 +30,6 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 
 | id | Question | Options |
 |---|---|---|
-| D1 | Dossier store engine | SQLite per client; or one Postgres beside Paperclip's |
 | D2 | How a question issue carries its answer in Paperclip | an issue document; a structured comment; an approval stage of an execution policy (R2) |
 | D3 | Exact model id per role, and the harness that runs it | per role row in the catalog (P8) |
 | D4 | Where Paperclip, the dossiers and the hank execution directories run, and who may read them | |
