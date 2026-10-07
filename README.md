@@ -36,8 +36,8 @@ documents (SPV zips, UBL XML, statement PDFs, expense reports)
 ## Where it stands (2026-10-07)
 
 Design and skeleton. The repository holds the principles, the architecture, the plan, the
-folder layout and the first piece of the gate kit (CUI check digit). No catalog row, route or
-hank is written yet. Next: `BUILD.md`.
+folder layout and the first pieces of the gate kit: the CUI check digit and the catalog loader
+with its row schemas. No catalog row, route or hank is written yet. Next: `BUILD.md`.
 
 ## Where things are
 
@@ -64,4 +64,5 @@ uv sync                                   # install
 uv run pytest -q                          # tests
 uv run ruff check . && uv run ruff format --check .
 uv run kit cui RO41526372                 # check a CUI's check digit
+uv run kit catalog                        # load and check the catalog
 ```

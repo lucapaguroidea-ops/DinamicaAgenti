@@ -11,7 +11,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-01 | done | — | Repository skeleton: docs, folder layout, `kit` package with the CUI check, tests, CI |
 | WP-02 | done | — | `LAW.md` reviewed and approved by the owner (2026-10-07) |
 | WP-03 | done | WP-02 | Citation test: every `[test]` principle has a test naming it |
-| WP-04 | todo | WP-02 | Catalog loader: row schemas, `status: draft`, unique ids, additive files, unknown id = error |
+| WP-04 | done | WP-02 | Catalog loader: row schemas, `status: draft`, unique ids, additive files, unknown id = error |
 | WP-05 | todo | WP-04 | Catalog rows: source documents, Job kinds, articole, mouths, reconcile profiles, close kinds, controls, filings, question kinds, model roles (`ARCHITECTURE.md` §4–§6) |
 | WP-06 | todo | WP-05 | Sorting in the kit: emit gates, Job kind, container split (`kit emit`) |
 | WP-07 | todo | WP-04, R3 | UBL reader, XML first (P6): CIUS-RO quoted in `RESEARCH_LOG.md` first |

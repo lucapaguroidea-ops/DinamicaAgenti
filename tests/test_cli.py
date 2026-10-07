@@ -13,3 +13,11 @@ def test_planned_commands_refuse(capsys):
     for name in PLANNED:
         assert main([name]) == 2
     assert "not built yet" in capsys.readouterr().err
+
+
+def test_catalog_command(tmp_path, capsys):
+    assert main(["catalog"]) == 0
+    assert "Articol" in capsys.readouterr().out
+    (tmp_path / "bad.yaml").write_text("catalog: Ledger\nfile_schema: 1\nrows: []\n")
+    assert main(["catalog", str(tmp_path)]) == 1
+    assert "unknown catalog 'Ledger'" in capsys.readouterr().err

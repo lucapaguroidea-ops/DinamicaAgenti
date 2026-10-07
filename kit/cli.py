@@ -1,15 +1,18 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
-Built so far: ``kit cui``. The other commands are named in ``ARCHITECTURE.md`` and refuse until
-their work package is done (``BUILD.md``): a command that is not built never pretends to work.
+Built so far: ``kit cui``, ``kit catalog``. The other commands are named in ``ARCHITECTURE.md``
+and refuse until their work package is done (``BUILD.md``): a command that is not built never
+pretends to work.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from kit import __version__
+from kit.catalog import CatalogError, load_catalog
 from kit.types import cui_is_valid, normalize_cui
 
 PLANNED = {
@@ -26,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("cui", help="check a CUI's check digit")
     c.add_argument("value")
+    k = sub.add_parser("catalog", help="load and check the catalog; print rows per catalog")
+    k.add_argument("root", nargs="?", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -34,6 +39,15 @@ def main(argv: list[str] | None = None) -> int:
         ok = cui_is_valid(args.value)
         print(f"{normalize_cui(args.value)} {'valid' if ok else 'invalid'}")
         return 0 if ok else 1
+    if args.cmd == "catalog":
+        try:
+            cat = load_catalog(args.root)
+        except CatalogError as err:
+            print("\n".join(err.problems), file=sys.stderr)
+            return 1
+        for kind, rows in cat.rows.items():
+            print(f"{kind:<18} {len(rows)}")
+        return 0
     print(f"kit {args.cmd}: not built yet ({PLANNED[args.cmd]})", file=sys.stderr)
     return 2
 
