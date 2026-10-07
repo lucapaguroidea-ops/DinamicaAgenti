@@ -26,7 +26,6 @@ PENDING: dict[str, str] = {
     "P5": "WP-13",  # routes: Validare comes only from a person; a closed month gets nothing
     "P7": "WP-13",  # router: the next step is a function of stored facts only
     "P8": "WP-14",  # hanks: a codon's model is the role row's pin; output checked before use
-    "P11": "WP-11",  # period: file is refused while material
 }
 
 _PRINCIPLE = re.compile(r"^- \*\*(P\d+) · ")

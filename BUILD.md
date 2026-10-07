@@ -18,7 +18,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-08 | done | WP-04 | Dossier store: unique keys and append-only logs (`ARCHITECTURE.md` §7) |
 | WP-09 | done | WP-07, WP-08 | PRE / POST matching and the settlement proposal |
 | WP-10 | todo | R4 | SAGA XML renderer: tags only from SAGA's manual or a test-firm import (P16) |
-| WP-11 | todo | WP-08 | Period difference and controls; materiality (P11) |
+| WP-11 | done | WP-08 | Period difference and controls; materiality (P11) |
 | WP-12 | todo | WP-05, WP-08 | Questions: closed answer schemas, checks, the answer log (`kit answer`, P12) |
 | WP-13 | todo | WP-06 … WP-12 | The router (`kit route`): the four procedures' route tables (P7) |
 | WP-14 | todo | R1 confirmed, D3 | The five hanks and `kit verify` |
