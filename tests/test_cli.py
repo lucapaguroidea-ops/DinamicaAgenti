@@ -89,3 +89,32 @@ def test_emit_into_a_dossier(tmp_path, capsys):
     again = json.loads(capsys.readouterr().out)
     assert first["created"] and not again["created"] and first["job_id"] == again["job_id"]
     assert (tmp_path / "dossiers" / "41526372" / "store.db").is_file()
+
+
+def test_answer_command(tmp_path, capsys):
+    import json
+
+    (tmp_path / "q.json").write_text(json.dumps({"job_id": "j1"}))
+    (tmp_path / "ok.json").write_text(json.dumps({"decision": "approve"}))
+    (tmp_path / "bad.json").write_text(json.dumps({"decision": "maybe"}))
+    base = [
+        "answer",
+        "--dossiers",
+        str(tmp_path / "d"),
+        "--cui",
+        "41526372",
+        "--issue",
+        "job:j1",
+        "--kind",
+        "v3_approve",
+        "--question",
+        str(tmp_path / "q.json"),
+        "--operator",
+        "Ana",
+    ]
+    assert main([*base, "--answer", str(tmp_path / "bad.json")]) == 3
+    assert "decision" in json.loads(capsys.readouterr().out)["error"]
+    assert main([*base, "--answer", str(tmp_path / "ok.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "accepted"
+    assert main([*base, "--answer", str(tmp_path / "ok.json"), "--actor", "saga_agent"]) == 1
+    assert "for a person" in capsys.readouterr().err
