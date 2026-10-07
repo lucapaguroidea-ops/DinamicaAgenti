@@ -1,0 +1,88 @@
+# Month controls (ARCHITECTURE §4.4). A blocking control that cannot be computed fails.
+# Adding, removing or relaxing a control is the owner's decision (P15).
+catalog: Control
+file_schema: 1
+rows:
+  - id: c0_synthetic_parity
+    status: draft
+    layer: close
+    severity: blocking
+    rule: For each watched account, |expected + explained - SAGA| < epsilon.
+    watched: ["401", "4111", "4426", "4427", "4428", "5121", "5311"]
+    epsilon: "0.01"
+  - id: c1_outbound_complete
+    status: draft
+    layer: close
+    severity: blocking
+    rule: Every expected Job is acked, already in the books, or listed as an outbound hole.
+  - id: c2_unexplained_empty
+    status: draft
+    layer: close
+    severity: blocking
+    rule: No unexplained SAGA document.
+  - id: m1_1_payables_tie
+    status: draft
+    layer: close
+    severity: blocking
+    rule: Sum of analytics under 401 equals 401, once client maps exist.
+    watched: ["401"]
+  - id: m1_1_trade_ext
+    status: draft
+    layer: close
+    severity: advisory
+    rule: Analytics of 403, 404, 408, 409 tie to their parent, once client maps exist.
+    watched: ["403", "404", "408", "409"]
+  - id: m1_2_receivables_tie
+    status: draft
+    layer: close
+    severity: blocking
+    rule: Sum of analytics under 4111 equals 4111, once client maps exist.
+    watched: ["4111"]
+  - id: m1_2_trade_ext
+    status: draft
+    layer: close
+    severity: advisory
+    rule: Analytics of 411, 413, 418, 419 tie to their parent, once client maps exist.
+    watched: ["411", "413", "418", "419"]
+  - id: m1_8_4428_open
+    status: draft
+    layer: close
+    severity: blocking
+    rule: Sum of 4428 on open TVA-la-încasare documents equals the balance of 4428.
+    watched: ["4428"]
+    require: {exig: [tva_la_incasare]}
+  - id: m1_9_4424_watched
+    status: draft
+    layer: close
+    severity: advisory
+    rule: Movement on 4424 has an explained rule or an expected settlement.
+    watched: ["4424"]
+  - id: t_regime_4428
+    status: draft
+    layer: close
+    severity: blocking
+    rule: Not a VAT payer - unexplained 4428 in SAGA is material.
+    watched: ["4428"]
+    require: {tva: [tva_neplatitor, tva_scutire_mici]}
+  - id: t_regime_442x
+    status: draft
+    layer: close
+    severity: advisory
+    rule: Not a VAT payer - unexplained 4423 or 4424 in SAGA goes to a person.
+    watched: ["4423", "4424"]
+    require: {tva: [tva_neplatitor, tva_scutire_mici]}
+  - id: c2_waiting_for_xml
+    status: draft
+    layer: close
+    severity: advisory
+    rule: An unexplained document matching a part waiting for its SPV XML is named as waiting.
+  - id: p_prefile_duplicate
+    status: draft
+    layer: prefile
+    severity: blocking
+    rule: The PRE verdict is not already_posted and the source hash is unique.
+  - id: p_prefile_hard_failures
+    status: draft
+    layer: prefile
+    severity: blocking
+    rule: No blocking failure on the batch before a package is written.

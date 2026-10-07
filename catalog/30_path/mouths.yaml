@@ -1,0 +1,76 @@
+# SAGA mouths: import modules. Tags are written only from SAGA's manual or a test-firm import (P16).
+catalog: Mouth
+file_schema: 1
+rows:
+  - id: intrare_factura_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: intrare
+    validare: person
+    backup: before_batch
+    gate: {policy: first_n, first_n: 5}
+  - id: iesire_factura_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: iesire
+    validare: person
+    backup: before_batch
+    gate: {policy: first_n, first_n: 5}
+  - id: storno_intrare_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: storn_intrare
+    validare: person
+    backup: before_each
+    gate: {policy: always}
+  - id: storno_iesire_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: storn_iesire
+    validare: person
+    backup: before_each
+    gate: {policy: always}
+  - id: incasare_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: incasare
+    validare: person
+    backup: before_batch
+    gate: {policy: first_n, first_n: 3}
+  - id: plata_xml
+    status: draft
+    saga_path: import_xml
+    doc_class: plata
+    validare: person
+    backup: before_batch
+    gate: {policy: first_n, first_n: 3}
+  - id: parteneri_xml
+    status: draft
+    saga_path: import_xml
+    validare: n_a
+    backup: before_batch
+    gate: {policy: first_n, first_n: 5}
+    note: Partners imported ahead of the invoices that name them.
+  - id: articole_xml
+    status: draft
+    saga_path: import_xml
+    validare: n_a
+    backup: before_batch
+    gate: {policy: first_n, first_n: 5}
+    note: Articles (stock items) imported ahead of the invoices that name them.
+  - id: nota_nc_dbf
+    status: draft
+    saga_path: import_dbf
+    doc_class: nota_interna
+    validare: person
+    backup: before_each
+    gate: {policy: always}
+    note: Accounting note; for non-payer reverse charge until D5 is decided.
+  - id: bon_via_nota
+    status: draft
+    saga_path: import_dbf
+    doc_class: nota_interna
+    validare: person
+    backup: before_each
+    gate: {policy: always}
+    note: Receipts through an accounting note; decided after the receipts loop (D6).

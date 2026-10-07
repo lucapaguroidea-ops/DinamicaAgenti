@@ -1,0 +1,91 @@
+# Articole de cale on the document path (ARCHITECTURE §4.2): which walk, which gate, which mouth.
+catalog: Articol
+file_schema: 1
+rows:
+  - id: ro_efactura_inbound
+    status: draft
+    procedure: document
+    filters: {fiscal_class: ro_efactura, our_role: inbound, is_storno: false}
+    mouths: [parteneri_xml, articole_xml, intrare_factura_xml]
+    gate: {policy: first_n, first_n: 5}
+    reconcile: {match_keys: [number, date], expect_accounts: ["401", "4426"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+  - id: ro_efactura_outbound
+    status: draft
+    procedure: document
+    filters: {fiscal_class: ro_efactura, our_role: outbound, is_storno: false}
+    mouths: [parteneri_xml, articole_xml, iesire_factura_xml]
+    gate: {policy: first_n, first_n: 5}
+    reconcile: {match_keys: [number, date], expect_accounts: ["4111", "4427"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+  - id: storno_intrare
+    status: draft
+    procedure: document
+    filters: {fiscal_class: ro_efactura, our_role: inbound, is_storno: true}
+    mouths: [storno_intrare_xml]
+    gate: {policy: always}
+    reconcile: {match_keys: [number, date], expect_accounts: ["401", "4426"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+  - id: storno_iesire
+    status: draft
+    procedure: document
+    filters: {fiscal_class: ro_efactura, our_role: outbound, is_storno: true}
+    mouths: [storno_iesire_xml]
+    gate: {policy: always}
+    reconcile: {match_keys: [number, date], expect_accounts: ["4111", "4427"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+  - id: foreign_invoice_inbound
+    status: draft
+    procedure: document
+    filters: {fiscal_class: foreign_invoice, our_role: inbound, is_storno: false}
+    require: {tva: [tva_platitor]}
+    mouths: [parteneri_xml, intrare_factura_xml]
+    gate: {policy: always}
+    reconcile: {match_keys: [number, date], expect_accounts: ["401"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+    note: Reverse-charge VAT accounts [de confirmat] on a test firm (Loop 6).
+  - id: foreign_invoice_outbound
+    status: draft
+    procedure: document
+    filters: {fiscal_class: foreign_invoice, our_role: outbound, is_storno: false}
+    mouths: [parteneri_xml, iesire_factura_xml]
+    gate: {policy: always}
+    reconcile: {match_keys: [number, date], expect_accounts: ["4111"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+  - id: foreign_rc_neplatitor
+    status: draft
+    procedure: document
+    filters: {fiscal_class: foreign_invoice, our_role: inbound, is_storno: false}
+    require: {tva: [tva_neplatitor, tva_scutire_mici]}
+    mouths: [nota_nc_dbf]
+    gate: {policy: always}
+    reconcile: {match_keys: [number, date], expect_accounts: [], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+    note: Expected accounts (4423 or 446x) wait on D5; until then always a person.
+  - id: bon_cu_cui
+    status: draft
+    procedure: document
+    filters: {fiscal_class: bon, our_role: inbound, is_storno: false, our_cui_on_doc: true}
+    mouths: [bon_via_nota]
+    gate: {policy: always}
+    reconcile: {match_keys: [date, gross], expect_accounts: [], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+    note: Receipt with the client's CUI; the mouth waits on D6.
+  - id: bon_fara_cui
+    status: draft
+    procedure: document
+    filters: {fiscal_class: bon, our_role: inbound, is_storno: false, our_cui_on_doc: false}
+    mouths: [bon_via_nota]
+    gate: {policy: always}
+    reconcile: {match_keys: [date, gross], expect_accounts: [], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+    note: No CUI on a receipt is not deductibility; the mouth waits on D6.
+  - id: extras_statement
+    status: draft
+    procedure: document
+    filters: {fiscal_class: extras, is_storno: false}
+    mouths: [incasare_xml, plata_xml]
+    gate: {policy: first_n, first_n: 3}
+    reconcile: {match_keys: [date, gross], expect_accounts: ["5121"], tolerance: "0.05"}
+    valid_from: "2026-01-01"
+    note: A bank line names no partner; the person binds it, helped by the settlement proposal.

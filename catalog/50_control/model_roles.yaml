@@ -1,0 +1,53 @@
+# Model roles (ARCHITECTURE §6). model stays unset until D3: an unset role refuses and a person
+# is asked (P8). card is the codon's prompt file.
+catalog: ModelRole
+file_schema: 1
+rows:
+  - id: reader_document
+    status: draft
+    system: reader
+    hank: read-document
+    codon: read
+    card: hanks/read-document/prompts/read.md
+  - id: reader_split
+    status: draft
+    system: reader
+    hank: split-container
+    codon: propose
+    card: hanks/split-container/prompts/propose.md
+  - id: judge_document
+    status: draft
+    system: one
+    hank: judge-document
+    codon: judge
+    card: hanks/judge-document/prompts/judge.md
+  - id: explain_approve
+    status: draft
+    system: two
+    hank: judge-document
+    codon: explain
+    card: hanks/judge-document/prompts/explain.md
+  - id: review_match
+    status: draft
+    system: one
+    hank: review-match
+    codon: review
+    card: hanks/review-match/prompts/review.md
+  - id: close_suggest
+    status: draft
+    system: one
+    hank: close-suggest
+    codon: suggest
+    card: hanks/close-suggest/prompts/suggest.md
+  - id: explain_close
+    status: draft
+    system: two
+    hank: close-suggest
+    codon: explain
+    card: hanks/close-suggest/prompts/explain.md
+  - id: draft_rule
+    status: draft
+    system: two
+    hank: close-suggest
+    codon: draft_rule
+    card: hanks/close-suggest/prompts/draft_rule.md

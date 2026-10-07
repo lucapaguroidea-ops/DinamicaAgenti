@@ -1,0 +1,110 @@
+# What a file is, whether it is primary, and whether it may become a Job (ARCHITECTURE §4.1).
+catalog: SourceDoc
+file_schema: 1
+rows:
+  - id: ro_efactura_ubl
+    status: draft
+    posting_eligible: true
+    primary_kinds: [ubl_spv, xml]
+    needs_counterparty_cui: true
+    fiscal_class: ro_efactura
+    note: RO e-invoice, CIUS-RO UBL or SPV zip; XML first (P6).
+  - id: ro_efactura_pdf
+    status: draft
+    posting_eligible: false
+    primary_kinds: [ubl_spv]
+    fiscal_class: ro_efactura
+    note: PDF of an RO e-invoice; not primary without its UBL; waits for its XML (P6).
+  - id: foreign_invoice
+    status: draft
+    posting_eligible: true
+    primary_kinds: [pdf, jpeg, png, xml]
+    emit_on_incomplete: true
+    fiscal_class: foreign_invoice
+    note: Foreign invoice as a scan or PDF; read by the Reader.
+  - id: foreign_invoice_xml
+    status: draft
+    posting_eligible: true
+    primary_kinds: [xml]
+    fiscal_class: foreign_invoice
+    note: Foreign invoice as UBL XML.
+  - id: bon_fiscal
+    status: draft
+    posting_eligible: true
+    primary_kinds: [jpeg, png, pdf]
+    emit_on_incomplete: true
+    bon_cui_fork: true
+    fiscal_class: bon
+    our_role_default: inbound
+    note: Fiscal receipt; whether the client's CUI is on it is settled before emit.
+  - id: extras
+    status: draft
+    posting_eligible: true
+    primary_kinds: [mt940, sta, xlsx, csv]
+    needs_client_on_doc: true
+    fiscal_class: extras
+    note: Bank statement in a bank's data format.
+  - id: extras_pdf
+    status: draft
+    posting_eligible: true
+    primary_kinds: [pdf]
+    needs_client_on_doc: true
+    fiscal_class: extras
+    note: Bank statement as PDF; every line must tie and the holder CUI be the client's.
+  - id: extras_statement_pdf
+    status: draft
+    posting_eligible: true
+    primary_kinds: [pdf]
+    needs_client_on_doc: true
+    fiscal_class: extras
+    note: One movement line of a PDF statement; one Job per line.
+  - id: decont_cheltuieli
+    status: draft
+    posting_eligible: false
+    primary_kinds: [xls, xlsx, pdf, msg, eml]
+    needs_client_on_doc: true
+    split:
+      question: decont_split
+      children: [decont_part_evidence, ro_efactura_ubl, ro_efactura_pdf, workings]
+    note: Expense report; a container that never becomes a Job.
+  - id: decont_part_evidence
+    status: draft
+    posting_eligible: false
+    note: A receipt or foreign invoice inside an expense report, kept as evidence.
+  - id: workings
+    status: draft
+    posting_eligible: false
+    note: Working papers.
+  - id: instructions
+    status: draft
+    posting_eligible: false
+    primary_kinds: [eml, pdf, jpeg]
+    note: The client's instructions.
+  - id: stat_salarii
+    status: draft
+    posting_eligible: false
+    note: Payroll statement; evidence only, payroll is posted in SAGA.
+  - id: spv_register
+    status: draft
+    posting_eligible: false
+    note: The SPV register of invoices; a witness for PRE.
+  - id: sink_rj
+    status: draft
+    posting_eligible: false
+    note: SAGA's registru jurnal export; the eye.
+  - id: sink_balanta
+    status: draft
+    posting_eligible: false
+    note: SAGA's balanță export; the eye.
+  - id: sink_jurnal_cumparari
+    status: draft
+    posting_eligible: false
+    note: SAGA's purchase journal export; the eye.
+  - id: sink_jurnal_vanzari
+    status: draft
+    posting_eligible: false
+    note: SAGA's sales journal export; the eye.
+  - id: unknown
+    status: draft
+    posting_eligible: false
+    note: Unclassified; a person answers define_class.

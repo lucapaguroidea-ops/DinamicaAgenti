@@ -1,0 +1,44 @@
+# Filings: SAGA produces each declaration; the system gates it; an item closes only on its
+# receipt, never by date. Due dates and forms are [de confirmat] until quoted (P16).
+catalog: Filing
+file_schema: 1
+rows:
+  - id: d300_platitor
+    status: draft
+    form: D300
+    require: {tva: [tva_platitor]}
+    books_gate: [c0_synthetic_parity, c1_outbound_complete, c2_unexplained_empty]
+  - id: d394_platitor
+    status: draft
+    form: D394
+    require: {tva: [tva_platitor]}
+    books_gate: [c1_outbound_complete, c2_unexplained_empty]
+  - id: d301_neplatitor_rc
+    status: draft
+    form: D301
+    require: {tva: [tva_neplatitor, tva_scutire_mici], cross_border: [inbound_eu_services, mixed]}
+    books_gate: [t_regime_442x]
+    note: Not every non-payer; only with EU services bought.
+  - id: d390_rc
+    status: draft
+    form: D390
+    require: {cross_border: [inbound_eu_services, outbound_b2b, outbound_b2c, mixed]}
+  - id: d406_saft
+    status: draft
+    form: D406
+    books_gate: [c0_synthetic_parity]
+    note: SAGA produces the SAF-T file; this system never builds it.
+  - id: d100_profit
+    status: draft
+    form: D100
+    require: {impozit: [profit_16]}
+    forbid: {forma: [pfa, ii]}
+  - id: d100_micro
+    status: draft
+    form: D100
+    require: {impozit: [micro_1, micro_3]}
+  - id: d112_payroll
+    status: draft
+    form: D112
+    require: {employees: [has]}
+    note: Payroll is posted in SAGA and arrives as explained.

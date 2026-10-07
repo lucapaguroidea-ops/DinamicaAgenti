@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+# client facts never live in this repository (P13, AGENTS.md)
+dossiers/
+# Hankweave execution directories and Paperclip local data
+.hankweave/
+runs/

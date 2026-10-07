@@ -1,0 +1,23 @@
+# CO.DiT axes: what a client is for a period (legal form, tax, VAT, exigibility, ...).
+# Articole, close kinds, controls and filings require / forbid values of these axes.
+catalog: Axis
+file_schema: 1
+rows:
+  - id: forma
+    status: draft
+    values: [srl, sa, pfa, ii]
+  - id: impozit
+    status: draft
+    values: [profit_16, micro_1, micro_3, norma_venit]
+  - id: tva
+    status: draft
+    values: [tva_platitor, tva_neplatitor, tva_scutire_mici]
+  - id: exig
+    status: draft
+    values: [tva_la_livrare, tva_la_incasare]
+  - id: cross_border
+    status: draft
+    values: [none, inbound_eu_services, outbound_b2b, outbound_b2c, mixed]
+  - id: employees
+    status: draft
+    values: [none, has]
