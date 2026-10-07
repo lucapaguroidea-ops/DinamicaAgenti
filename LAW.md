@@ -1,7 +1,7 @@
 # Law
 
-Status: **draft, 2026-10-07**, from the design note (`docs/design/`). In force once the owner
-approves it.
+Status: **in force, approved by the owner on 2026-10-07**, from the design note (`docs/design/`).
+A change to any principle is the owner's dated decision.
 
 **How to read it.** Every principle has a permanent id (`P1` …), never reused; a removed
 principle's id is retired. `[test]` marks a principle the build must enforce: a failing test

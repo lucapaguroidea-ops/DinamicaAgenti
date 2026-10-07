@@ -9,7 +9,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | id | status | depends | title |
 |---|---|---|---|
 | WP-01 | done | — | Repository skeleton: docs, folder layout, `kit` package with the CUI check, tests, CI |
-| WP-02 | decision | — | `LAW.md` reviewed and approved by the owner |
+| WP-02 | done | — | `LAW.md` reviewed and approved by the owner (2026-10-07) |
 | WP-03 | todo | WP-02 | Citation test: every `[test]` principle has a test naming it |
 | WP-04 | todo | WP-02 | Catalog loader: row schemas, `status: draft`, unique ids, additive files, unknown id = error |
 | WP-05 | todo | WP-04 | Catalog rows: source documents, Job kinds, articole, mouths, reconcile profiles, close kinds, controls, filings, question kinds, model roles (`ARCHITECTURE.md` §4–§6) |
