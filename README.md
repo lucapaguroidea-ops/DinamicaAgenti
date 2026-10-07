@@ -36,8 +36,9 @@ documents (SPV zips, UBL XML, statement PDFs, expense reports)
 ## Where it stands (2026-10-07)
 
 Design and skeleton. The repository holds the principles, the architecture, the plan, the
-folder layout, the first pieces of the gate kit (the CUI check digit, the catalog loader) and
-the catalog rows, all `draft`. No route or hank is written yet; no model is pinned (D3). Next: `BUILD.md`.
+folder layout, the catalog rows (all `draft`) and the first pieces of the gate kit: the CUI
+check digit, the catalog loader, Sorting (the emit gates) and the e-invoice reader (UBL, XML
+first). No store, route or hank is written yet; no model is pinned (D3). Next: `BUILD.md`.
 
 ## Where things are
 
@@ -65,4 +66,5 @@ uv run pytest -q                          # tests
 uv run ruff check . && uv run ruff format --check .
 uv run kit cui RO41526372                 # check a CUI's check digit
 uv run kit catalog                        # load and check the catalog
+uv run kit read spv.zip --client RO41526372   # read an e-invoice (XML first), inbound or outbound
 ```

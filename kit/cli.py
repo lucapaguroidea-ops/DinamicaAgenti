@@ -1,8 +1,8 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
-Built so far: ``kit cui``, ``kit catalog``, ``kit emit``. The other commands are named in
-``ARCHITECTURE.md`` and refuse until their work package is done (``BUILD.md``): a command that
-is not built never pretends to work.
+Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``. The other commands are
+named in ``ARCHITECTURE.md`` and refuse until their work package is done (``BUILD.md``): a
+command that is not built never pretends to work.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from kit import __version__
 from kit.catalog import CatalogError, load_catalog
 from kit.sorting import Pack, SplitError, decide, split
 from kit.types import cui_is_valid, normalize_cui
+from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
 PLANNED = {
     "route": "WP-13: the next step of an issue, from the dossier's facts",
@@ -36,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("pack", type=Path, help="the pack, a JSON file")
     e.add_argument("--split", type=Path, help="a decont_split answer (JSON): print the children")
     e.add_argument("--catalog", type=Path, default=Path("catalog"))
+    r = sub.add_parser("read", help="read an e-invoice: UBL XML or the SPV zip (XML first)")
+    r.add_argument("file", type=Path)
+    r.add_argument("--client", help="the client's CUI: says inbound or outbound")
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -55,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "emit":
         return _emit(args)
+    if args.cmd == "read":
+        return _read(args)
     print(f"kit {args.cmd}: not built yet ({PLANNED[args.cmd]})", file=sys.stderr)
     return 2
 
@@ -75,6 +81,25 @@ def _emit(args: argparse.Namespace) -> int:
             ]
     except (CatalogError, SplitError, ValueError, OSError) as err:
         print(f"kit emit: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _read(args: argparse.Namespace) -> int:
+    """Print the document read from a UBL XML or an SPV zip, and its side for --client."""
+    try:
+        data = args.file.read_bytes()
+        name = args.file.name
+        if data[:4] == b"PK\x03\x04":
+            spv = read_spv_zip(data)
+            data, name = spv.invoice, spv.invoice_name
+        doc = parse_ubl(data)
+        out: dict = {"file": name, "document": doc.model_dump()}
+        if args.client:
+            out["client"] = for_client(doc, args.client).model_dump()
+    except (UblError, OSError) as err:
+        print(f"kit read: {err}", file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0

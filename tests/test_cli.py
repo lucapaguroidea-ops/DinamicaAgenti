@@ -44,3 +44,25 @@ def test_emit_command(tmp_path, capsys):
     (tmp_path / "bad.json").write_text(json.dumps({**good, "client_cui": "41526371"}))
     assert main(["emit", str(tmp_path / "bad.json")]) == 1
     assert "not a valid CUI" in capsys.readouterr().err
+
+
+def test_read_command(tmp_path, capsys):
+    import io
+    import json
+    import zipfile
+
+    from test_ubl import ubl
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("123.xml", ubl())
+        z.writestr("semnatura_123.xml", b'<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"/>')
+    (tmp_path / "spv.zip").write_bytes(buf.getvalue())
+    assert main(["read", str(tmp_path / "spv.zip"), "--client", "RO41526372"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["file"] == "123.xml" and out["client"]["our_role"] == "inbound"
+    assert out["document"]["totals"]["gross"] == "119.00"
+
+    (tmp_path / "bad.xml").write_bytes(ubl(payable="1.00"))
+    assert main(["read", str(tmp_path / "bad.xml")]) == 1
+    assert "BR-CO-16" in capsys.readouterr().err
