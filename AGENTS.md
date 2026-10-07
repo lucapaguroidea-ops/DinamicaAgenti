@@ -23,6 +23,11 @@ uv run pytest -q; uv run ruff check . && uv run ruff format --check .
 one WP per commit: mark it done in BUILD.md and remove its details there
 ```
 
+A test that enforces a principle says so: `@pytest.mark.law("P<n>")`. The citation test
+(`tests/test_law_citations.py`) fails while a `[test]` principle has no such test, unless it
+waits in `PENDING` on an open work package; when the WP brings the test, its line leaves
+`PENDING` in the same commit.
+
 ## Hard bans
 
 - No model on a route (P7). The Dispatcher runs `kit route`; it has no model.

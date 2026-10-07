@@ -28,3 +28,5 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = ["law(*ids): the LAW.md principles this test enforces (P<n>)"]
