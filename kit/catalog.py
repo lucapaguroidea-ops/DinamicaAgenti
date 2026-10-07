@@ -208,6 +208,7 @@ class ReconcileProfileRow(Row):
     require_all_accounts: bool = False
     fallback_accounts: list[Account] = []
     review: bool = False
+    fiscal_classes: list[Slug] = []  # empty: the default profile of its stage
 
 
 class CloseKindRow(Row):
