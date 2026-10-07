@@ -15,6 +15,7 @@ from pathlib import Path
 from kit import __version__
 from kit.catalog import CatalogError, load_catalog
 from kit.sorting import Pack, SplitError, decide, split
+from kit.store import StoreError, open_dossier
 from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
@@ -37,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("pack", type=Path, help="the pack, a JSON file")
     e.add_argument("--split", type=Path, help="a decont_split answer (JSON): print the children")
     e.add_argument("--catalog", type=Path, default=Path("catalog"))
+    e.add_argument("--dossiers", type=Path, help="insert the Job into the client's dossier here")
     r = sub.add_parser("read", help="read an e-invoice: UBL XML or the SPV zip (XML first)")
     r.add_argument("file", type=Path)
     r.add_argument("--client", help="the client's CUI: says inbound or outbound")
@@ -72,14 +74,25 @@ def _emit(args: argparse.Namespace) -> int:
         cat = load_catalog(args.catalog)
         pack = Pack.model_validate(json.loads(args.pack.read_text(encoding="utf-8")))
         if args.split is None:
-            out: object = decide(cat, pack).model_dump()
+            decision = decide(cat, pack)
+            out: object = decision.model_dump()
+            if args.dossiers is not None and decision.emit:
+                dossier = open_dossier(args.dossiers, pack.client_cui)
+                job, created = dossier.insert_job(
+                    pack.client_cui,
+                    pack.source_hash,
+                    decision.job_kind,
+                    pack.source_doc_id,
+                    pack.period,
+                )
+                out = {**decision.model_dump(), "job_id": job.job_id, "created": created}
         else:
             answer = json.loads(args.split.read_text(encoding="utf-8"))
             out = [
                 {"pack": c.model_dump(), "decision": decide(cat, c).model_dump()}
                 for c in split(cat, pack, answer)
             ]
-    except (CatalogError, SplitError, ValueError, OSError) as err:
+    except (CatalogError, SplitError, StoreError, ValueError, OSError) as err:
         print(f"kit emit: {err}", file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))

@@ -280,6 +280,11 @@ folder `dossiers/{cui}/`: records and files live behind the same boundary, a bac
 touches one client only, and the only way in is a function that checks the CUI and opens that
 client's file. Every record still carries the CUI and is refused on a mismatch (P13).
 
+Built in `kit/store.py` (WP-08): `open_dossier(root, cui)` is the only way in; the file records
+its owner and refuses to open under another CUI; a trigger on every table refuses a row of another
+client; the job and answer logs are append-only (triggers); a Job's status moves forward only. The
+database keeps its rollback journal (no WAL), so a client's store is one file to copy.
+
 ```
 dossiers/{cui}/
   store.db                  unique keys and append-only logs

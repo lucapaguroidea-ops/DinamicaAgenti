@@ -66,3 +66,26 @@ def test_read_command(tmp_path, capsys):
     (tmp_path / "bad.xml").write_bytes(ubl(payable="1.00"))
     assert main(["read", str(tmp_path / "bad.xml")]) == 1
     assert "BR-CO-16" in capsys.readouterr().err
+
+
+def test_emit_into_a_dossier(tmp_path, capsys):
+    import hashlib
+    import json
+
+    pack = {
+        "client_cui": "41526372",
+        "period": "2026-09",
+        "source_hash": hashlib.sha256(b"doc").hexdigest(),
+        "source_doc_id": "ro_efactura_ubl",
+        "kinds": ["ubl_spv"],
+        "our_role": "inbound",
+        "counterparty_cui": "73645193",
+    }
+    (tmp_path / "pack.json").write_text(json.dumps(pack))
+    args = ["emit", str(tmp_path / "pack.json"), "--dossiers", str(tmp_path / "dossiers")]
+    assert main(args) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert main(args) == 0
+    again = json.loads(capsys.readouterr().out)
+    assert first["created"] and not again["created"] and first["job_id"] == again["job_id"]
+    assert (tmp_path / "dossiers" / "41526372" / "store.db").is_file()

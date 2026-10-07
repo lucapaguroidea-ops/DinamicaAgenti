@@ -37,8 +37,9 @@ documents (SPV zips, UBL XML, statement PDFs, expense reports)
 
 Design and skeleton. The repository holds the principles, the architecture, the plan, the
 folder layout, the catalog rows (all `draft`) and the first pieces of the gate kit: the CUI
-check digit, the catalog loader, Sorting (the emit gates) and the e-invoice reader (UBL, XML
-first). No store, route or hank is written yet; no model is pinned (D3). Next: `BUILD.md`.
+check digit, the catalog loader, Sorting (the emit gates), the e-invoice reader (UBL, XML
+first) and the dossier store (SQLite per client). No route or hank is written yet; no model is
+pinned (D3). Next: `BUILD.md`.
 
 ## Where things are
 
