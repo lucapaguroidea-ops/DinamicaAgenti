@@ -1,25 +1,26 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
-Built so far: ``kit cui``, ``kit catalog``. The other commands are named in ``ARCHITECTURE.md``
-and refuse until their work package is done (``BUILD.md``): a command that is not built never
-pretends to work.
+Built so far: ``kit cui``, ``kit catalog``, ``kit emit``. The other commands are named in
+``ARCHITECTURE.md`` and refuse until their work package is done (``BUILD.md``): a command that
+is not built never pretends to work.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from kit import __version__
 from kit.catalog import CatalogError, load_catalog
+from kit.sorting import Pack, SplitError, decide, split
 from kit.types import cui_is_valid, normalize_cui
 
 PLANNED = {
     "route": "WP-13: the next step of an issue, from the dossier's facts",
     "answer": "WP-12: validate and record an answer to a question issue",
     "verify": "WP-14: check a hank's output file before it becomes a fact",
-    "emit": "WP-06: the emit gates and the Job of a source document",
 }
 
 
@@ -31,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("value")
     k = sub.add_parser("catalog", help="load and check the catalog; print rows per catalog")
     k.add_argument("root", nargs="?", type=Path, default=Path("catalog"))
+    e = sub.add_parser("emit", help="Sorting: the emit gates of one file (a pack as JSON)")
+    e.add_argument("pack", type=Path, help="the pack, a JSON file")
+    e.add_argument("--split", type=Path, help="a decont_split answer (JSON): print the children")
+    e.add_argument("--catalog", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -48,8 +53,31 @@ def main(argv: list[str] | None = None) -> int:
         for kind, rows in cat.rows.items():
             print(f"{kind:<18} {len(rows)}")
         return 0
+    if args.cmd == "emit":
+        return _emit(args)
     print(f"kit {args.cmd}: not built yet ({PLANNED[args.cmd]})", file=sys.stderr)
     return 2
+
+
+def _emit(args: argparse.Namespace) -> int:
+    """Print the decision for a pack, or with --split the children and their decisions.
+    Exit 0 when it ran; 1 when the input or the catalog is refused (the reason on stderr)."""
+    try:
+        cat = load_catalog(args.catalog)
+        pack = Pack.model_validate(json.loads(args.pack.read_text(encoding="utf-8")))
+        if args.split is None:
+            out: object = decide(cat, pack).model_dump()
+        else:
+            answer = json.loads(args.split.read_text(encoding="utf-8"))
+            out = [
+                {"pack": c.model_dump(), "decision": decide(cat, c).model_dump()}
+                for c in split(cat, pack, answer)
+            ]
+    except (CatalogError, SplitError, ValueError, OSError) as err:
+        print(f"kit emit: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":

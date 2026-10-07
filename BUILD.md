@@ -13,7 +13,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-03 | done | WP-02 | Citation test: every `[test]` principle has a test naming it |
 | WP-04 | done | WP-02 | Catalog loader: row schemas, `status: draft`, unique ids, additive files, unknown id = error |
 | WP-05 | done | WP-04 | Catalog rows: source documents, Job kinds, articole, mouths, reconcile profiles, close kinds, controls, filings, question kinds, model roles (`ARCHITECTURE.md` §4–§6) |
-| WP-06 | todo | WP-05 | Sorting in the kit: emit gates, Job kind, container split (`kit emit`) |
+| WP-06 | done | WP-05 | Sorting in the kit: emit gates, Job kind, container split (`kit emit`) |
 | WP-07 | todo | WP-04, R3 | UBL reader, XML first (P6): CIUS-RO quoted in `RESEARCH_LOG.md` first |
 | WP-08 | todo | D1 | Dossier store: unique keys and append-only logs (`ARCHITECTURE.md` §7) |
 | WP-09 | todo | WP-07, WP-08 | PRE / POST matching and the settlement proposal |
