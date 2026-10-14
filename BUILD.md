@@ -23,7 +23,7 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-13 | done | WP-06 … WP-12 | The router (`kit route`): the four procedures' route tables (P7) |
 | WP-14 | todo | R1 confirmed, D3 | The five hanks and `kit verify` |
 | WP-15 | todo | R2 confirmed, D2 | Paperclip company: roles, labels, routines, budgets, the Dispatcher |
-| WP-16 | todo | WP-13 | Invented firms (five client types) and end-to-end scenarios |
+| WP-16 | done | WP-13 | Invented firms (five client types) and end-to-end scenarios |
 | WP-17 | todo | WP-10, WP-16 | Loop 0 in a SAGA C test firm |
 
 ## Decisions (owner)

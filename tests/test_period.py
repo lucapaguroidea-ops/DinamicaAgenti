@@ -290,3 +290,22 @@ def test_the_diff_names_its_snapshot(cat):
         == diff(cat).snapshot_id
         != diff(cat, items=[item(gross="120.00")]).snapshot_id
     )
+
+
+def test_a_non_payer_posts_no_vat_account(cat):
+    axes = {"tva": "tva_neplatitor"}
+    lines = [jl("I-1", "401", "credit", "119.00"), jl("I-1", "628", "debit", "119.00")]
+    assert status(diff(cat, w=witness(lines=lines), axes=axes), "c0_synthetic_parity") == "PASS"
+
+
+def test_tva_la_incasare_waits_on_4428(cat):
+    axes = {"tva": "tva_platitor", "exig": "tva_la_incasare"}
+    lines = [
+        jl("I-1", "401", "credit", "119.00"),
+        jl("I-1", "4428", "debit", "19.00"),
+        jl("I-1", "628", "debit", "100.00"),
+    ]
+    d = diff(
+        cat, [item(vat_open="-19.00")], witness(lines=lines), axes=axes, balances={"4428": "-19.00"}
+    )
+    assert status(d, "c0_synthetic_parity") == "PASS" and status(d, "m1_8_4428_open") == "PASS"

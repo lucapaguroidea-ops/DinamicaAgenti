@@ -1,8 +1,8 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
 Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``,
-``kit route``. The other commands are named in ``ARCHITECTURE.md`` and refuse until their work
-package is done (``BUILD.md``): a command that is not built never pretends to work.
+``kit route``, ``kit scenario``. The other commands are named in ``ARCHITECTURE.md`` and refuse
+until their work package is done (``BUILD.md``): a command that is not built never pretends to work.
 """
 
 from __future__ import annotations
@@ -16,8 +16,10 @@ from kit import __version__
 from kit.catalog import CatalogError, load_catalog
 from kit.questions import AnswerError, answer_question
 from kit.route import route
+from kit.scenario import DEFECTS, ScenarioError, run_month
 from kit.sorting import Pack, SplitError, decide, split
 from kit.store import StoreError, open_dossier
+from kit.synthetic import FIRMS
 from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
@@ -55,6 +57,14 @@ def main(argv: list[str] | None = None) -> int:
     ro = sub.add_parser("route", help="the next step of an issue, from its facts (JSON)")
     ro.add_argument("--procedure", required=True, choices=["batch", "job", "recon", "close"])
     ro.add_argument("--facts", type=Path, required=True, help="the issue's facts (JSON)")
+    sc = sub.add_parser("scenario", help="an invented firm's month, end to end (synthetic)")
+    sc.add_argument("firm", help="one of: " + ", ".join(FIRMS))
+    sc.add_argument("--period", required=True, help="YYYY-MM")
+    sc.add_argument("--dossiers", type=Path, required=True)
+    sc.add_argument("--defect", action="append", default=[], choices=DEFECTS)
+    sc.add_argument("--eu-service", action="store_true", help="add a service bought from the EU")
+    sc.add_argument("--seed", type=int, default=7)
+    sc.add_argument("--catalog", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -78,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         return _read(args)
     if args.cmd == "answer":
         return _answer(args)
+    if args.cmd == "scenario":
+        return _scenario(args)
     if args.cmd == "route":
         try:
             step = route(args.procedure, json.loads(args.facts.read_text(encoding="utf-8")))
@@ -118,6 +130,44 @@ def _emit(args: argparse.Namespace) -> int:
     except (CatalogError, SplitError, StoreError, ValueError, OSError) as err:
         print(f"kit emit: {err}", file=sys.stderr)
         return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _scenario(args: argparse.Namespace) -> int:
+    """Print each document's walk and the month's close. Exit 0 when the walk went as designed
+    (a material month held is as designed); 1 when it did not or the input is refused."""
+    if args.firm not in FIRMS:
+        print(f"kit scenario: unknown firm {args.firm!r}: one of {list(FIRMS)}", file=sys.stderr)
+        return 1
+    try:
+        r = run_month(
+            load_catalog(args.catalog),
+            args.dossiers,
+            args.firm,
+            args.period,
+            tuple(args.defect),
+            args.seed,
+            args.eu_service,
+        )
+    except (CatalogError, ScenarioError, StoreError, ValueError, OSError) as err:
+        print(f"kit scenario: {err}", file=sys.stderr)
+        return 1
+    out = {
+        "firm": r.firm,
+        "period": r.period,
+        "documents": [
+            {"name": t.name, "job_id": t.job_id, "articol": t.articol, "steps": t.steps}
+            for t in r.trails
+        ],
+        "close": {
+            "material": r.diff.material,
+            "blockers": r.diff.blockers,
+            "v2": r.v2,
+            "steps": r.close_steps,
+        },
+        "answers": r.answers,
+    }
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0
 

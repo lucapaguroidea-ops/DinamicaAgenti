@@ -130,14 +130,25 @@ def expected_set_hash(items: list[ExpectedItem]) -> str:
     return hashlib.sha256(json.dumps(body).encode()).hexdigest()
 
 
-def _implied(item: ExpectedItem) -> list[tuple[str, Decimal]]:
-    """(account, credit − debit) the expected document implies on the watched accounts."""
+def _implied(item: ExpectedItem, axes: dict[str, str] | None = None) -> list[tuple[str, Decimal]]:
+    """(account, credit − debit) the expected document implies on the watched accounts.
+
+    A VAT payer posts deductible VAT on 4426 and collected VAT on 4427; under TVA la încasare
+    both wait on 4428 until settlement; a non-payer posts no VAT account (the VAT is in the
+    cost) and invoices none. [de confirmat] on a test firm (Loops 4 and 7)."""
+    axes = axes or {}
     g, v = Decimal(item.gross), Decimal(item.vat or "0")
     side = _SIDE.get(item.doc_class)
+    payer = axes.get("tva", "tva_platitor") == "tva_platitor"
+    incasare = axes.get("exig") == "tva_la_incasare"
     if side == "in":
-        return [("401", g), ("4426", -v)]
+        if not payer:
+            return [("401", g)]
+        return [("401", g), ("4428" if incasare else "4426", -v)]
     if side == "out":
-        return [("4111", -g), ("4427", v)]
+        if not payer:
+            return [("4111", -g)]
+        return [("4111", -g), ("4428" if incasare else "4427", v)]
     if item.doc_class == "incasare":
         return [("5121", -g)] + ([("4111", g)] if item.partner_cui else [])
     if item.doc_class == "plata":
@@ -227,7 +238,7 @@ def period_diff(
     # ----- parity -----
     implied: dict[str, Decimal] = defaultdict(Decimal)
     for i in expected:
-        for account, amount in _implied(i):
+        for account, amount in _implied(i, axes):
             implied[account] += amount
     for account, amount in _net(explained_lines).items():
         implied[account] += amount
@@ -401,7 +412,8 @@ def _maps(ctx, row):
 def _m1_8(ctx, row):
     if ctx.balances is None or "4428" not in ctx.balances:
         return "FAIL", "cannot be computed: no balance of 4428"
-    open_vat = sum((Decimal(i.vat_open) for i in ctx.expected if i.vat_open), Decimal(0))
+    # vat_open is signed like 4428's movement: sales + (credit), purchases − (debit)
+    open_vat = abs(sum((Decimal(i.vat_open) for i in ctx.expected if i.vat_open), Decimal(0)))
     held = abs(Decimal(ctx.balances["4428"]))
     if abs(open_vat - held) >= Decimal("0.01"):
         return "FAIL", f"open VAT {open_vat} against 4428 {held}"
