@@ -39,9 +39,9 @@ Design and skeleton. The repository holds the principles, the architecture, the 
 folder layout, the catalog rows (all `draft`) and the first pieces of the gate kit: the CUI
 check digit, the catalog loader, Sorting (the emit gates), the e-invoice reader (UBL, XML
 first), the dossier store (SQLite per client), PRE / POST matching with the settlement
-proposal, the period difference with the month's controls, and questions with their answer
-log. No SAGA export reader, route or hank is written yet; no model is pinned (D3). Next:
-`BUILD.md`.
+proposal, the period difference with the month's controls, questions with their answer log,
+and the router. No SAGA export reader, XML renderer or hank is written yet; no model is pinned
+(D3). Next: `BUILD.md`.
 
 ## Where things are
 

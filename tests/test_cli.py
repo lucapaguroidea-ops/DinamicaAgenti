@@ -118,3 +118,14 @@ def test_answer_command(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["status"] == "accepted"
     assert main([*base, "--answer", str(tmp_path / "ok.json"), "--actor", "saga_agent"]) == 1
     assert "for a person" in capsys.readouterr().err
+
+
+def test_route_command(tmp_path, capsys):
+    import json
+
+    (tmp_path / "f.json").write_text(json.dumps({"recon_open": True}))
+    assert main(["route", "--procedure", "close", "--facts", str(tmp_path / "f.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["name"] == "recon"
+    (tmp_path / "bad.json").write_text(json.dumps({"model_says": "file"}))
+    assert main(["route", "--procedure", "close", "--facts", str(tmp_path / "bad.json")]) == 1
+    assert "model_says" in capsys.readouterr().err

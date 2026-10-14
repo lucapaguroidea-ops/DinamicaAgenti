@@ -23,8 +23,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # principle id → the work package whose tests will name it. Shrinks to empty.
 PENDING: dict[str, str] = {
     "P3": "WP-10",  # renderer: the only output toward SAGA is an import file of a mouth row
-    "P5": "WP-13",  # routes: Validare comes only from a person; a closed month gets nothing
-    "P7": "WP-13",  # router: the next step is a function of stored facts only
     "P8": "WP-14",  # hanks: a codon's model is the role row's pin; output checked before use
 }
 

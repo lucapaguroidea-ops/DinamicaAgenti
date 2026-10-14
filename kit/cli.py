@@ -1,8 +1,8 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
-Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``. The
-other commands are named in ``ARCHITECTURE.md`` and refuse until their work package is done
-(``BUILD.md``): a command that is not built never pretends to work.
+Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``,
+``kit route``. The other commands are named in ``ARCHITECTURE.md`` and refuse until their work
+package is done (``BUILD.md``): a command that is not built never pretends to work.
 """
 
 from __future__ import annotations
@@ -15,13 +15,13 @@ from pathlib import Path
 from kit import __version__
 from kit.catalog import CatalogError, load_catalog
 from kit.questions import AnswerError, answer_question
+from kit.route import route
 from kit.sorting import Pack, SplitError, decide, split
 from kit.store import StoreError, open_dossier
 from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
 PLANNED = {
-    "route": "WP-13: the next step of an issue, from the dossier's facts",
     "verify": "WP-14: check a hank's output file before it becomes a fact",
 }
 
@@ -52,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--operator", required=True, help="who answered")
     a.add_argument("--actor", choices=["person", "saga_agent"], default="person")
     a.add_argument("--catalog", type=Path, default=Path("catalog"))
+    ro = sub.add_parser("route", help="the next step of an issue, from its facts (JSON)")
+    ro.add_argument("--procedure", required=True, choices=["batch", "job", "recon", "close"])
+    ro.add_argument("--facts", type=Path, required=True, help="the issue's facts (JSON)")
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -75,6 +78,14 @@ def main(argv: list[str] | None = None) -> int:
         return _read(args)
     if args.cmd == "answer":
         return _answer(args)
+    if args.cmd == "route":
+        try:
+            step = route(args.procedure, json.loads(args.facts.read_text(encoding="utf-8")))
+        except (ValueError, OSError) as err:
+            print(f"kit route: {err}", file=sys.stderr)
+            return 1
+        print(step.model_dump_json())
+        return 0
     print(f"kit {args.cmd}: not built yet ({PLANNED[args.cmd]})", file=sys.stderr)
     return 2
 
