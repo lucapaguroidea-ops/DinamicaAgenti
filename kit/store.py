@@ -83,8 +83,14 @@ _TABLES = {
         submitted_by TEXT, at TEXT NOT NULL, PRIMARY KEY (period, filing_id),
         CHECK (state = 'open' OR (receipt_key IS NOT NULL AND receipt_key != ''))""",
     "backup_labels": """label TEXT PRIMARY KEY, client_cui TEXT NOT NULL, at TEXT NOT NULL""",
+    "issue_facts": """seq INTEGER PRIMARY KEY AUTOINCREMENT, client_cui TEXT NOT NULL,
+        issue TEXT NOT NULL, key TEXT NOT NULL, source TEXT NOT NULL
+        CHECK (source IN ('kit', 'verify', 'answer', 'refusal', 'dispatcher')),
+        fields TEXT NOT NULL, at TEXT NOT NULL, UNIQUE (issue, key)""",
+    "paperclip_links": """issue TEXT PRIMARY KEY, client_cui TEXT NOT NULL,
+        paperclip_id TEXT NOT NULL UNIQUE, at TEXT NOT NULL""",
 }
-_APPEND_ONLY = ("job_events", "answers")
+_APPEND_ONLY = ("job_events", "answers", "issue_facts", "paperclip_links")
 
 
 class StoreError(ValueError):
@@ -328,6 +334,63 @@ class Dossier:
             (role_id, input_hash, card_hash),
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    # ----- an issue's facts (what the router reads) and its Paperclip issue -----
+
+    def add_facts(self, issue: str, key: str, source: str, fields: dict) -> bool:
+        """Append facts once per (issue, key): a replayed step adds nothing (P9). False when
+        the key was already written with the same fields; a different body is refused."""
+        body = json.dumps(fields, sort_keys=True)
+        row = self.db.execute(
+            "SELECT fields FROM issue_facts WHERE issue = ? AND key = ?", (issue, key)
+        ).fetchone()
+        if row is not None:
+            if row[0] == body:
+                return False
+            raise StoreError(f"{issue}: facts {key!r} are already written, differently")
+        with self.db:
+            self.db.execute(
+                "INSERT INTO issue_facts (client_cui, issue, key, source, fields, at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (self.client_cui, issue, key, source, body, _now()),
+            )
+        return True
+
+    def facts(self, issue: str) -> dict:
+        """The issue's facts: every write merged in order, a later field over an earlier one."""
+        merged: dict = {}
+        for (body,) in self.db.execute(
+            "SELECT fields FROM issue_facts WHERE issue = ? ORDER BY seq", (issue,)
+        ):
+            merged.update(json.loads(body))
+        return merged
+
+    def link_issue(self, issue: str, paperclip_id: str) -> str:
+        """Record the Paperclip issue of one of ours, once; returns the id that holds."""
+        row = self.db.execute(
+            "SELECT paperclip_id FROM paperclip_links WHERE issue = ?", (issue,)
+        ).fetchone()
+        if row is not None:
+            return row[0]
+        with self.db:
+            self.db.execute(
+                "INSERT INTO paperclip_links (issue, client_cui, paperclip_id, at)"
+                " VALUES (?, ?, ?, ?)",
+                (issue, self.client_cui, paperclip_id, _now()),
+            )
+        return paperclip_id
+
+    def paperclip_id(self, issue: str) -> str | None:
+        row = self.db.execute(
+            "SELECT paperclip_id FROM paperclip_links WHERE issue = ?", (issue,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def issue_of(self, paperclip_id: str) -> str | None:
+        row = self.db.execute(
+            "SELECT issue FROM paperclip_links WHERE paperclip_id = ?", (paperclip_id,)
+        ).fetchone()
+        return row[0] if row else None
 
     # ----- answers -----
 

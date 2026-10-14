@@ -22,17 +22,17 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-12 | done | WP-05, WP-08 | Questions: closed answer schemas, checks, the answer log (`kit answer`, P12) |
 | WP-13 | done | WP-06 … WP-12 | The router (`kit route`): the four procedures' route tables (P7) |
 | WP-14 | done | R1 confirmed | The five hanks and `kit verify`; every role refuses until D3 |
-| WP-15 | todo | R2 confirmed, D2 | Paperclip company: roles, labels, routines, budgets, the Dispatcher |
+| WP-15 | done | R2 confirmed, D2 | Paperclip company: roles, labels, routines, budgets, the Dispatcher |
 | WP-16 | done | WP-13 | Invented firms (five client types) and end-to-end scenarios |
 | WP-17 | todo | WP-10, WP-16 | Loop 0 in a SAGA C test firm |
+| WP-18 | todo | WP-15, D4 | Sources and books exports in the dossier; every kit step an executor of the Dispatcher; `kit hank-run` (render, input, run, `kit verify`) |
 
 ## Decisions (owner)
 
 | id | Question | Options |
 |---|---|---|
-| D2 | How a question issue carries its answer in Paperclip | an issue document; a structured comment; an approval stage of an execution policy (R2) |
 | D3 | Exact model id per role, and the harness that runs it | `model:` on each of the 9 rows of `catalog/50_control/model_roles.yaml` (P8); until then every hank refuses and a person is asked |
-| D4 | Where Paperclip, the dossiers and the hank execution directories run, and who may read them | |
+| D4 | Where Paperclip, the dossiers and the hank execution directories run, and who may read them | the Paperclip deployment (`authenticated`, not `local_trusted`, for more than one person); `KIT_HOME`, `DOSSIERS`, `ACCOUNTANT_USER_ID`, `SAGA_AGENT_URL`; where a webhook secret is kept; the budgets and the close date marked `owner` in `paperclip/company.yaml` |
 | D5 | Non-payer reverse-charge accounts: 4423 or 446x | until decided: no expected accounts, always a person |
 | D6 | Receipts through an accounting note (DBF mouth) | decided after the receipts loop |
 

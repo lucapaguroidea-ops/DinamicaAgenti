@@ -99,9 +99,57 @@ Source: repository README, <https://github.com/paperclipai/paperclip>. The docum
 - Secrets by reference; local or S3-compatible file storage.
 - CLI: `npx paperclipai@latest onboard`; `npx paperclipai configure`.
 
-**To confirm** on the documentation site before WP-15: the Process and HTTP adapter
-configuration; the API for creating, blocking and closing issues; whether a person can be an
-issue's assignee as well as an approver; how a structured answer is attached (D2).
+**Confirmed 2026-10-14** from the published packages (MIT): `paperclipai`,
+`@paperclipai/server` and `@paperclipai/shared`, all `2026.1012.0` (published 2026-10-12); the
+server's bundled agent skill (`skills/paperclip/references/api-reference.md`), its route code and
+the shared zod validators; and a **live run** of that version (`paperclipai onboard --yes --run`,
+`local_trusted`, loopback, embedded PostgreSQL, Node.js 24.11.1 in a scratch directory) driven by
+`kit/paperclip.py` and `kit/dispatch.py`. The documentation site is still unreachable.
+
+- **Adapters.** `process`: `command`, `args`, `cwd`, `env`, `timeoutSec`, `graceSec`; the run gets
+  `PAPERCLIP_API_URL`, `PAPERCLIP_API_KEY` (a run-scoped JWT), `PAPERCLIP_RUN_ID`,
+  `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID` and, on a wake, `PAPERCLIP_TASK_ID`,
+  `PAPERCLIP_WAKE_REASON` (`issue_commented`, `issue_blockers_resolved`,
+  `issue_children_completed`, `interaction_pending`, …); exit ≠ 0 is a failed run. `http`: `url`,
+  `method`, `headers`, `payloadTemplate`, `timeoutSec`. A model is adapter config of the
+  coding adapters only; the cabinet's agents are `process` / `http`.
+- **Issues.** `POST /api/companies/{id}/issues` (`title`, `status`, `projectId`, `parentId`,
+  `assigneeAgentId` | `assigneeUserId` (one assignee), `blockedByIssueIds`, `labelIds`,
+  `idempotencyKey`); `PATCH /api/issues/{id}` (status, assignee, `comment`); statuses `backlog`,
+  `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`; 409 = another owns it (never
+  retried), 422 = a refused transition. Labels: `POST /api/companies/{id}/labels` `{name ≤ 48,
+  color #rrggbb}`. A person can be an issue's assignee (`assigneeUserId`) as well as an approver.
+- **Questions (D2).** Issue-thread interactions, `POST /api/issues/{id}/interactions`:
+  `ask_user_questions` (`payload.questionSet`, schema `paperclip.question_set.v1`, up to 64
+  questions, `answerMode` `single_select` | `multi_select` | `text` with `textValidation`),
+  `request_confirmation`, `request_checkbox_confirmation` (`defaultSelectedOptionIds` must meet
+  `minSelected`; "defaults alone are not consent"), `request_item_verdicts`, `suggest_tasks`.
+  `resolverPolicy` `anyone` | `not_creator` | `human_only` (snapshotted, never widened later);
+  `addresseeAgentId` for an agent's question (only it or a board user resolves);
+  `idempotencyKey` (≤ 255); `continuationPolicy` `wake_assignee`. `GET …/interactions` returns
+  the list; a resolved card has `status` (`answered`, `accepted`, `rejected`, `expired`,
+  `cancelled`, …), `result` (`answers[]` of `{questionId, optionIds, otherText}`, or `outcome` and
+  `selectedOptionIds`) and `resolvedByUserId` / `resolvedByAgentId`. Answering:
+  `…/{iid}/respond` `{answers}`, `…/accept` `{selectedOptionIds}`, `…/reject`.
+- **Routines.** `POST /api/companies/{id}/routines` (`title`, `projectId`, `assigneeAgentId`,
+  `concurrencyPolicy`, `catchUpPolicy`); `POST /api/routines/{id}/triggers` `schedule`
+  (`cronExpression`, `timezone`) | `webhook` | `api`; the answer is `{trigger, secretMaterial,
+  revision}`, and a webhook's `secretMaterial` (`webhookUrl`, `webhookSecret`) is shown once.
+- **Budgets.** `POST /api/companies/{id}/budgets/policies` `{scopeType company | agent |
+  project, scopeId, amount (cents), windowKind calendar_month_utc | lifetime, warnPercent,
+  hardStopEnabled (default true)}`.
+- **Seen live:** every set-up request of `paperclip/company.yaml` and a client was accepted (and
+  checked against the zod validators with no field dropped); a second `apply` sent nothing; a
+  refused judge led to a `human_only` `v3_approve` card with the issue `in_review`; a replayed
+  wake added nothing; the board's `respond` came back as `answered` by `local-board` and was
+  accepted by `kit answer`; `file` on a material month was refused and asked again on a new card
+  that showed the error; a checkbox card was accepted with the ticked part only; the same
+  idempotency key returned the same card. Found live and fixed: a trigger's id is nested
+  (`trigger.id`); a create without an idempotency key that dies mid-request can repeat, so a
+  request is now marked in flight first.
+- In `local_trusted` mode a request with no bearer is the implicit board user `local-board`; a
+  board key minted there did not resolve to a user and was read as an agent token (401). The
+  kit's client always sends a key: run Paperclip `authenticated` (D4).
 
 ## R3 · RO e-Factura: UBL 2.1, EN 16931 and CIUS-RO (read 2026-10-07)
 

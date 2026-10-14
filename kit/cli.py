@@ -1,7 +1,8 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
 Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``,
-``kit route``, ``kit scenario``, ``kit hank``, ``kit verify``. A command named in
+``kit route``, ``kit scenario``, ``kit hank``, ``kit verify``, ``kit paperclip``,
+``kit dispatch``. A command named in
 ``ARCHITECTURE.md`` and not built yet refuses until its work package is done (``BUILD.md``): a
 command that is not built never pretends to work.
 """
@@ -27,7 +28,7 @@ from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
 PLANNED = {
-    "prepare": "WP-15: write a hank run's input.json from the dossier, for the Dispatcher",
+    "hank-run": "next: write a run's input.json from the dossier, run the hank, kit verify it",
 }
 
 
@@ -85,6 +86,20 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--cui", help="the client's CUI (with --dossiers)")
     v.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
     v.add_argument("--catalog", type=Path, default=Path("catalog"))
+    pc = sub.add_parser("paperclip", help="the company in Paperclip: print or apply its set-up")
+    pc.add_argument("action", choices=["setup"])
+    pc.add_argument("--file", type=Path, default=Path("paperclip/company.yaml"))
+    pc.add_argument("--client", help="add one client (its CUI): project, budget, routines")
+    pc.add_argument("--client-cents", type=int, default=0, help="the client's monthly hard stop")
+    pc.add_argument("--state", type=Path, help="the ids file (with --apply)")
+    pc.add_argument("--apply", action="store_true", help="send it (PAPERCLIP_API_URL, _KEY)")
+    dp = sub.add_parser("dispatch", help="the Dispatcher: route one woken Paperclip issue")
+    dp.add_argument("--issue", help="our issue key (default: from PAPERCLIP_TASK_ID's title)")
+    dp.add_argument("--cui", help="the client (default: from the issue's title)")
+    dp.add_argument("--dossiers", type=Path, help="default: POARTA_DOSSIERS")
+    dp.add_argument("--state", type=Path, help="default: POARTA_PAPERCLIP_STATE")
+    dp.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
+    dp.add_argument("--catalog", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -108,6 +123,10 @@ def main(argv: list[str] | None = None) -> int:
         return _read(args)
     if args.cmd == "answer":
         return _answer(args)
+    if args.cmd == "paperclip":
+        return _paperclip(args)
+    if args.cmd == "dispatch":
+        return _dispatch(args)
     if args.cmd == "hank":
         return _hank(args)
     if args.cmd == "verify":
@@ -155,6 +174,99 @@ def _emit(args: argparse.Namespace) -> int:
         print(f"kit emit: {err}", file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _paperclip(args: argparse.Namespace) -> int:
+    """Print the set-up's requests, or send them with --apply (exit 0); 1 when refused."""
+    from kit.paperclip import (
+        HttpClient,
+        PaperclipError,
+        SetupError,
+        apply,
+        load_company,
+        plan_client,
+        plan_company,
+    )
+
+    try:
+        conf = load_company(args.file)
+        plan = (
+            plan_client(conf, args.client, args.client_cents)
+            if args.client
+            else (plan_company(conf))
+        )
+        if not args.apply:
+            for r in plan.requests:
+                print(
+                    json.dumps(
+                        {
+                            "ref": r.ref,
+                            "method": r.method,
+                            "path": r.path,
+                            "body": r.body,
+                            "note": r.note,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            return 0
+        if not args.state:
+            raise SetupError("--apply needs --state, the file that keeps the ids")
+        ids = apply(plan, HttpClient.from_env(), args.state)
+    except (SetupError, PaperclipError, OSError, KeyError) as err:
+        print(f"kit paperclip: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps(ids, indent=2))
+    return 0
+
+
+def _dispatch(args: argparse.Namespace) -> int:
+    """One wake. Exit 0 when the issue was routed (whatever the step); 1 on an error."""
+    import os
+    import re
+
+    from kit.dispatch import Company, dispatch
+    from kit.paperclip import HttpClient, PaperclipError, SetupError, load_state
+
+    try:
+        dossiers = args.dossiers or Path(os.environ["POARTA_DOSSIERS"])
+        state = args.state or Path(os.environ["POARTA_PAPERCLIP_STATE"])
+        client = HttpClient.from_env()
+        issue, cui = args.issue, args.cui
+        if not issue or not cui:
+            task = os.environ.get("PAPERCLIP_TASK_ID")
+            if not task:
+                raise SetupError("no issue: give --issue and --cui, or wake with PAPERCLIP_TASK_ID")
+            title = client.request("GET", f"/api/issues/{task}")["title"]
+            m = re.fullmatch(r"([a-z]+:[^ \[]+) \[(\d+)\]", title.strip())
+            if not m:
+                raise SetupError(f"{title!r} is not an issue of the kit (key [cui])")
+            issue, cui = m.group(1), m.group(2)
+        if not state.exists():
+            raise SetupError(f"{state}: run kit paperclip setup --apply first")
+        co = Company(load_state(state), os.environ.get("ACCOUNTANT_USER_ID", ""))
+        if not co.accountant_user_id:
+            raise SetupError("set ACCOUNTANT_USER_ID: a held issue goes to a person")
+        tick = dispatch(
+            load_catalog(args.catalog), args.root, open_dossier(dossiers, cui), issue, client, co
+        )
+    except (
+        SetupError,
+        PaperclipError,
+        CatalogError,
+        StoreError,
+        KeyError,
+        ValueError,
+        OSError,
+    ) as err:
+        print(f"kit dispatch: {err}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {"issue": tick.issue, "steps": tick.steps, "ended": tick.ended}, ensure_ascii=False
+        )
+    )
     return 0
 
 

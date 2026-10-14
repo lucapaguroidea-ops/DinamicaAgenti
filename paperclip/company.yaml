@@ -1,0 +1,94 @@
+# The cabinet as a Paperclip company (ARCHITECTURE §8; RESEARCH_LOG R2: paperclipai 2026.1012.0).
+# `kit paperclip setup` turns this file into the API requests that create it, in order, and
+# records the ids it gets back; a second run creates nothing that already exists.
+# Values marked "owner" are the owner's to set before the first apply.
+runtime: paperclipai@2026.1012.0
+
+company:
+  name: Cabinet contabil
+  description: Documente primare către SAGA C, prin porți. Fiecare pas e al trusei sau al unei persoane.
+  goal: Fiecare lună a fiecărui client închisă în SAGA C prin porțile ei.
+  monthly_cents: 0            # owner: the company's hard-stop budget (a 0 budget spends nothing)
+
+# Labels mark an issue's kind; the title carries its key (job:j_…, close:{cui}:{period}, …).
+labels:
+  batch: "#6b7280"
+  job: "#2563eb"
+  recon: "#d97706"
+  close: "#7c3aed"
+  hank: "#0891b2"
+  question: "#dc2626"
+  hold: "#b91c1c"
+
+agents:
+  dispatcher:
+    name: Dispatcher
+    title: Router (no model)
+    role: general
+    capabilities: Runs kit route on every wake; creates, blocks and closes issues; asks the questions.
+    adapterType: process
+    adapterConfig:
+      command: uv
+      args: [run, kit, dispatch]
+      cwd: ${KIT_HOME}          # owner (D4): where this repository is checked out
+      env: {POARTA_DOSSIERS: ${DOSSIERS}}
+      timeoutSec: 600
+    monthly_cents: 0            # no model: it spends nothing
+  reader:
+    name: Reader
+    title: Reads scans and statements
+    role: researcher
+    capabilities: Runs the read-document and split-container hanks when assigned.
+    adapterType: process
+    adapterConfig: {command: uv, args: [run, kit, hank-run], cwd: ${KIT_HOME}, timeoutSec: 900}
+    hanks: [read-document, split-container]
+    monthly_cents: 0            # owner: hard stop; every role refuses until D3 anyway
+  classifier:
+    name: Classifier
+    title: System One
+    role: researcher
+    capabilities: Runs the judge-document, review-match and close-suggest hanks when assigned.
+    adapterType: process
+    adapterConfig: {command: uv, args: [run, kit, hank-run], cwd: ${KIT_HOME}, timeoutSec: 900}
+    hanks: [judge-document, review-match, close-suggest]
+    monthly_cents: 0            # owner
+  saga_import:
+    name: SAGA import agent
+    title: The program on the SAGA machine
+    role: general
+    capabilities: Pulls the outbox, labels a backup, imports, snapshots, answers wait_validare.
+    adapterType: http
+    adapterConfig: {url: ${SAGA_AGENT_URL}, method: POST, timeoutSec: 120}
+    paused: true                # a person until the program is built: a board user answers its cards
+    monthly_cents: 0
+
+# The Explainer (System Two) runs inside the hanks of the Classifier (judge-document,
+# close-suggest): one agent per hank keeps a hank's codons in one run.
+
+projects:
+  build: {name: Build, description: This repository, on invented data only.}
+  client: {name: "Client {cui}", description: "Dosarul clientului {cui}: o lună pe rând."}
+
+# Routines of a client's project, created with the client. Each firing opens an issue for the
+# Dispatcher (or the import agent), which routes it like any other.
+routines:
+  recon_recheck:
+    title: "recon:{cui}: verifică din nou fereastra"
+    assignee: dispatcher
+    trigger: {kind: webhook}    # fired when a books export of the client arrives
+  reads_retry:
+    title: "batch:{cui}: reia citirile parcate"
+    assignee: dispatcher
+    trigger: {kind: schedule, cronExpression: "40 5 * * 1-5", timezone: Europe/Bucharest}
+  saga_pull:
+    title: "saga:{cui}: preia pachetele din outbox"
+    assignee: saga_import
+    trigger: {kind: schedule, cronExpression: "50 7 * * 1-5", timezone: Europe/Bucharest}
+  month_close:
+    title: "close:{cui}: închiderea lunii"
+    assignee: dispatcher
+    trigger: {kind: schedule, cronExpression: "45 8 5 * *", timezone: Europe/Bucharest}  # owner: the cabinet's date
+
+# People. Their Paperclip user ids are the owner's to give (D4); the board is the owner.
+people:
+  accountant: ${ACCOUNTANT_USER_ID}
