@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -83,6 +84,13 @@ _TABLES = {
         submitted_by TEXT, at TEXT NOT NULL, PRIMARY KEY (period, filing_id),
         CHECK (state = 'open' OR (receipt_key IS NOT NULL AND receipt_key != ''))""",
     "backup_labels": """label TEXT PRIMARY KEY, client_cui TEXT NOT NULL, at TEXT NOT NULL""",
+    "sources": """source_hash TEXT PRIMARY KEY, client_cui TEXT NOT NULL, period TEXT NOT NULL,
+        name TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, at TEXT NOT NULL""",
+    "exports": """seq INTEGER PRIMARY KEY AUTOINCREMENT, client_cui TEXT NOT NULL,
+        export_id TEXT NOT NULL UNIQUE, months TEXT NOT NULL, path TEXT NOT NULL,
+        sha256 TEXT NOT NULL, at TEXT NOT NULL""",
+    "codit": """period TEXT PRIMARY KEY, client_cui TEXT NOT NULL, axes TEXT NOT NULL,
+        at TEXT NOT NULL""",
     "issue_facts": """seq INTEGER PRIMARY KEY AUTOINCREMENT, client_cui TEXT NOT NULL,
         issue TEXT NOT NULL, key TEXT NOT NULL, source TEXT NOT NULL
         CHECK (source IN ('kit', 'verify', 'answer', 'refusal', 'dispatcher')),
@@ -90,7 +98,15 @@ _TABLES = {
     "paperclip_links": """issue TEXT PRIMARY KEY, client_cui TEXT NOT NULL,
         paperclip_id TEXT NOT NULL UNIQUE, at TEXT NOT NULL""",
 }
-_APPEND_ONLY = ("job_events", "answers", "issue_facts", "paperclip_links")
+_APPEND_ONLY = (
+    "job_events",
+    "answers",
+    "issue_facts",
+    "paperclip_links",
+    "sources",
+    "exports",
+    "codit",
+)
 
 
 class StoreError(ValueError):
@@ -334,6 +350,124 @@ class Dossier:
             (role_id, input_hash, card_hash),
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    # ----- what came in: documents, books exports, the client's CO.DiT -----
+
+    def _write_once(self, rel: Path, data: bytes) -> str:
+        digest = hashlib.sha256(data).hexdigest()
+        target = self.folder / rel
+        if target.exists():
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise StoreError(f"{rel} exists with other content")
+            return digest
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+        return digest
+
+    def put_source(self, period: str, name: str, data: bytes) -> str:
+        """A document as received, named by its hash, once (P4): returns the source hash."""
+        if not is_period(period):
+            raise StoreError(f"{period!r} is not a period YYYY-MM")
+        if not data:
+            raise StoreError("an empty file is not a document")
+        digest = hashlib.sha256(data).hexdigest()
+        if self.db.execute("SELECT 1 FROM sources WHERE source_hash = ?", (digest,)).fetchone():
+            return digest
+        suffix = "".join(c for c in Path(name).suffix.lower() if c.isalnum() or c == ".")[:8]
+        rel = Path("sources") / period / f"{digest}{suffix}"
+        self._write_once(rel, data)
+        with self.db:
+            self.db.execute(
+                "INSERT INTO sources (source_hash, client_cui, period, name, path, size, at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (digest, self.client_cui, period, name[:200], rel.as_posix(), len(data), _now()),
+            )
+        return digest
+
+    def source(self, source_hash: str) -> tuple[bytes, dict]:
+        row = self.db.execute(
+            "SELECT period, name, path FROM sources WHERE source_hash = ?", (source_hash,)
+        ).fetchone()
+        if row is None:
+            raise StoreError(f"no source {source_hash[:12]} in this dossier")
+        data = (self.folder / row[2]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != source_hash:
+            raise StoreError(f"source {source_hash[:12]} changed on disk")
+        return data, {"period": row[0], "name": row[1], "path": row[2]}
+
+    def put_export(self, export_id: str, months: list[str], body: dict) -> None:
+        """A books export (the kit's reading of SAGA's reports), once per id; the latest export
+        that covers a month is the books of that month."""
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", export_id):
+            raise StoreError(f"{export_id!r}: an export id is a slug (a-z, 0-9, _)")
+        if not months or not all(is_period(m) for m in months):
+            raise StoreError("an export names the months it covers (YYYY-MM)")
+        data = json.dumps(body, sort_keys=True, ensure_ascii=False).encode()
+        row = self.db.execute(
+            "SELECT sha256 FROM exports WHERE export_id = ?", (export_id,)
+        ).fetchone()
+        digest = hashlib.sha256(data).hexdigest()
+        if row is not None:
+            if row[0] != digest:
+                raise StoreError(f"export {export_id} is already stored, differently")
+            return
+        rel = Path("eye") / f"{export_id}.json"
+        self._write_once(rel, data)
+        with self.db:
+            self.db.execute(
+                "INSERT INTO exports (client_cui, export_id, months, path, sha256, at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    self.client_cui,
+                    export_id,
+                    json.dumps(sorted(months)),
+                    rel.as_posix(),
+                    digest,
+                    _now(),
+                ),
+            )
+
+    def exports(self) -> list[dict]:
+        rows = self.db.execute("SELECT export_id, months, path FROM exports ORDER BY seq")
+        return [{"export_id": r[0], "months": json.loads(r[1]), "path": r[2]} for r in rows]
+
+    def export(self, export_id: str) -> dict:
+        hit = next((e for e in self.exports() if e["export_id"] == export_id), None)
+        if hit is None:
+            raise StoreError(f"no export {export_id!r} in this dossier")
+        return json.loads((self.folder / hit["path"]).read_text(encoding="utf-8"))
+
+    def set_codit(self, period: str, axes: dict[str, str]) -> None:
+        """The client's CO.DiT for a period, once: never overwritten (ARCHITECTURE §4.4)."""
+        if not is_period(period):
+            raise StoreError(f"{period!r} is not a period YYYY-MM")
+        body = json.dumps(axes, sort_keys=True)
+        row = self.db.execute("SELECT axes FROM codit WHERE period = ?", (period,)).fetchone()
+        if row is not None:
+            if row[0] != body:
+                raise StoreError(f"the CO.DiT of {period} is already set; it is never overwritten")
+            return
+        with self.db:
+            self.db.execute(
+                "INSERT INTO codit (period, client_cui, axes, at) VALUES (?, ?, ?, ?)",
+                (period, self.client_cui, body, _now()),
+            )
+
+    def codit(self, period: str) -> dict[str, str] | None:
+        row = self.db.execute("SELECT axes FROM codit WHERE period = ?", (period,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def mark_test_firm(self) -> None:
+        """A test firm (invented or a SAGA test firm): draft catalog rows may bind (P14)."""
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('test_firm', '1')")
+
+    @property
+    def is_test_firm(self) -> bool:
+        row = self.db.execute("SELECT value FROM meta WHERE key = 'test_firm'").fetchone()
+        return bool(row and row[0] == "1")
 
     # ----- an issue's facts (what the router reads) and its Paperclip issue -----
 

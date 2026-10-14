@@ -12,7 +12,26 @@ def test_cui_command(capsys):
 def test_planned_commands_refuse(capsys):
     for name in PLANNED:
         assert main([name]) == 2
-    assert "not built yet" in capsys.readouterr().err
+        assert "not built yet" in capsys.readouterr().err
+
+
+def test_every_command_the_documents_name_exists():
+    import re
+    from pathlib import Path
+
+    import pytest
+
+    root = Path(__file__).resolve().parents[1]
+    named = set()
+    for doc in [*root.glob("*.md"), *root.glob("*/README.md")]:
+        named |= set(
+            re.findall(r"`(?:uv run )?kit ([a-z][a-z-]*)", doc.read_text(encoding="utf-8"))
+        )
+    assert named, "the documents name kit commands"
+    for name in sorted(named):
+        with pytest.raises(SystemExit) as out:
+            main([name, "--help"])
+        assert out.value.code == 0, name
 
 
 def test_catalog_command(tmp_path, capsys):

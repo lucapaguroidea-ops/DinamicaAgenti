@@ -28,7 +28,7 @@ Conventions (checked by `kit hank check` and `tests/test_hanks.py`):
   command line the Dispatcher uses: the exact runtime version, `--headless`, `--max-cost`,
   `--max-time` from the hank's budget, never `-m`, `--force` or `--ignore-rig-failures`;
 - the input is one data directory, mounted read-only (`<%DATA_DIR%>/input.json` and the
-  document files), written for one client (P13) by `kit hank-run` (planned: render, write the input, run, verify);
+  document files), written for one client (P13) by `kit hank-run`, which then runs the hank and verifies it;
 - `kit verify --role R --input input.json --output out/F.json` checks the file against the
   role's `answer` shape and its own check; with `--dossiers` a passing answer is stored under
   (role, input hash, card hash). The card hash covers the pin, `system.md` and the card, so a

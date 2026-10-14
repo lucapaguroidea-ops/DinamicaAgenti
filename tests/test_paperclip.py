@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
+from fake_paperclip import Fake  # noqa: E402
 
 from kit.cards import PROMPTS, CardError, answer_from_result, card
 from kit.catalog import load_catalog
@@ -41,57 +42,6 @@ def cat():
     return load_catalog(ROOT / "catalog")
 
 
-# ----- a fake Paperclip: the API calls the kit makes, in memory -----
-
-
-class Fake:
-    def __init__(self, fail_at: int | None = None):
-        self.calls: list[tuple[str, str, dict | None]] = []
-        self.issues: dict[str, dict] = {}
-        self.cards: dict[str, list[dict]] = {}
-        self.comments: dict[str, list[str]] = {}
-        self.n, self.fail_at = 0, fail_at
-
-    def _id(self, prefix: str) -> str:
-        self.n += 1
-        return f"{prefix}-{self.n}"
-
-    def request(self, method, path, body=None):
-        if self.fail_at is not None and len(self.calls) == self.fail_at:
-            raise PaperclipError(500, method, path, "down")
-        self.calls.append((method, path, body))
-        if m := re.fullmatch(r"/api/companies/[^/]+/issues", path):
-            iid = self._id("iss")
-            self.issues[iid] = dict(body, id=iid)
-            return self.issues[iid]
-        if m := re.fullmatch(r"/api/issues/([^/]+)", path):
-            if method == "GET":
-                return self.issues[m.group(1)]
-            self.issues[m.group(1)].update({k: v for k, v in body.items() if k != "comment"})
-            if body.get("comment"):
-                self.comments.setdefault(m.group(1), []).append(body["comment"])
-            return self.issues[m.group(1)]
-        if m := re.fullmatch(r"/api/issues/([^/]+)/comments", path):
-            self.comments.setdefault(m.group(1), []).append(body["body"])
-            return {"id": self._id("cmt")}
-        if m := re.fullmatch(r"/api/issues/([^/]+)/interactions", path):
-            rows = self.cards.setdefault(m.group(1), [])
-            if method == "GET":
-                return rows
-            same = [r for r in rows if r["idempotencyKey"] == body["idempotencyKey"]]
-            if same:
-                return same[0]
-            row = dict(body, id=self._id("int"), status="pending", result=None)
-            rows.append(row)
-            return row
-        return {"id": self._id("obj")}
-
-    def resolve(self, pid, status, result, user="user-acc", agent=None):
-        row = [r for r in self.cards[pid] if r["status"] == "pending"][-1]
-        row.update(status=status, result=result, resolvedByUserId=user, resolvedByAgentId=agent)
-        return row
-
-
 def company() -> Company:
     ids = {
         "company": "co-1",
@@ -119,7 +69,15 @@ def job_issue(d, **facts) -> str:
         book_is_saga=True,
         mouths_for_class=1,
     )
-    d.add_facts(issue, "seed", "kit", {**base, **facts})
+    seeded = {**base, **facts}
+    chain = ["bound", "reconcile_pre", "approved", "packaged", "wait_validare", "acked"]
+    if seeded["status"] in chain:
+        stop = chain.index(seeded["status"])
+        if seeded.get("pre_verdict") and stop < 1:
+            stop = 1
+        for st in chain[: stop + 1]:
+            d.set_status(job.job_id, st)
+    d.add_facts(issue, "seed", "kit", seeded)
     return issue
 
 
@@ -419,7 +377,10 @@ def test_a_job_is_judged_by_refusal_asked_and_held_after_the_answer(cat, tmp_pat
     pc.resolve(pid, "answered", answered(decision=["approve"]))
     after = dispatch(cat, ROOT, d, issue, pc, co)
     assert after.steps[:2] == ["answered:v3_approve", "kit:package"]
-    assert after.ended.startswith("hold: kit step package is not wired")
+    assert (
+        after.ended
+        == "hold: kit step package: the package is WP-10's: the SAGA XML renderer waits on R4"
+    )
     assert (
         pc.issues[pid]["assigneeUserId"] == "user-acc" and pc.issues[pid]["assigneeAgentId"] is None
     )
@@ -462,9 +423,10 @@ def test_file_on_a_material_month_is_refused_on_the_card_and_asked_again(cat, tm
     assert d.facts(issue)["v2"] == "hold"
 
 
-def test_an_answer_whose_effect_is_not_wired_is_held_never_asked_twice(cat, tmp_path):
+def test_an_uploaded_export_settles_need_rj_export_and_the_window_is_rechecked(cat, tmp_path):
     d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
     issue = f"recon:{CLIENT}:2026-09"
+    d.put_export("rj_aug", ["2026-08"], {"covered": ["2026-08"]})
     d.add_facts(
         issue,
         "seed",
@@ -478,10 +440,29 @@ def test_an_answer_whose_effect_is_not_wired_is_held_never_asked_twice(cat, tmp_
     dispatch(cat, ROOT, d, issue, pc, co)
     pid = d.paperclip_id(issue)
     pc.resolve(pid, "answered", answered(export_id="rj_aug"))
+    tick = dispatch(cat, ROOT, d, issue, pc, co)
+    assert tick.steps == ["answered:need_rj_export", "kit:recheck_window", "done:clear"]
+
+
+def test_an_answer_whose_effect_is_not_wired_is_held_never_asked_twice(cat, tmp_path, monkeypatch):
+    import kit.dispatch
+
+    monkeypatch.setattr(kit.dispatch, "APPLY", {})
+    d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
+    issue = f"close:{CLIENT}:2026-09"
+    d.add_facts(
+        issue,
+        "seed",
+        "kit",
+        {"locked": True, "diffed": True, "suggested": True, "_ask:v2_close": {"material": False}},
+    )
+    dispatch(cat, ROOT, d, issue, pc, co)
+    pid = d.paperclip_id(issue)
+    pc.resolve(pid, "answered", answered(action=["hold"]))
     first = dispatch(cat, ROOT, d, issue, pc, co)
-    assert first.ended.startswith("hold: need_rj_export is answered")
+    assert first.ended.startswith("hold: v2_close is answered")
     second = dispatch(cat, ROOT, d, issue, pc, co)
-    assert second.ended.startswith("hold: need_rj_export is answered") and len(pc.cards[pid]) == 1
+    assert second.ended.startswith("hold: v2_close is answered") and len(pc.cards[pid]) == 1
 
 
 def test_bind_runs_from_the_facts_and_a_missing_executor_holds(cat, tmp_path):
@@ -498,7 +479,7 @@ def test_bind_runs_from_the_facts_and_a_missing_executor_holds(cat, tmp_path):
     )
     tick = dispatch(cat, ROOT, d, issue, pc, co)
     assert tick.steps == ["kit:bind", "kit:pre_check"]
-    assert tick.ended == "hold: kit step pre_check is not wired to the Dispatcher yet"
+    assert tick.ended == "hold: kit step pre_check: the fact '_doc' is not established yet"
     f = d.facts(issue)
     assert f["bound_articol"] == "ro_efactura_inbound" and f["mouths_for_class"] == 1
     assert d.job(issue.split(":", 1)[1]).status == "bound"

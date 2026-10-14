@@ -182,6 +182,7 @@ def pre_check(profile: ReconcileProfileRow | None, doc: Doc, w: Witness) -> PreR
     scope = [s for s in w.docs if s.date[:7] in months]
     snap = _snapshot(
         profile.id if profile else None,
+        missing,  # what the books cover is part of what they show (a later export, a new answer)
         [s.model_dump() for s in scope],
         [r.model_dump() for r in w.spv_register],
     )
@@ -256,7 +257,9 @@ def post_check(
             used=sorted(set(used)),
             missing=missing,
             profile_id=profile.id,
-            snapshot_id=_snapshot(profile.model_dump(), expected, [x.model_dump() for x in lines]),
+            snapshot_id=_snapshot(
+                profile.model_dump(), missing, expected, [x.model_dump() for x in lines]
+            ),
         )
 
     if missing or not w.lines:

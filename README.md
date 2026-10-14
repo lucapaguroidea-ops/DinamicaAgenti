@@ -42,7 +42,8 @@ first), the dossier store (SQLite per client), PRE / POST matching with the sett
 proposal, the period difference with the month's controls, questions with their answer log,
 the router, the five hanks with `kit verify` (every model role refuses until D3), the
 Paperclip company with its question cards and the Dispatcher (`kit paperclip`, `kit dispatch`,
-tried on a live Paperclip), and end-to-end scenarios on five invented firms (`kit scenario`: a month through
+tried on a live Paperclip), every kit step run from the client's dossier (`kit intake`,
+`kit dossier`, `kit hank-run`), and end-to-end scenarios on five invented firms (`kit scenario`: a month through
 Sorting and the document path up to the package, then its close against a simulated book). No
 SAGA export reader or XML renderer is written yet; no model is pinned (D3). Next: `BUILD.md`.
 
@@ -76,5 +77,7 @@ uv run kit read spv.zip --client RO41526372   # read an e-invoice (XML first), i
 uv run kit hank check                     # the hanks fit their role rows
 uv run kit verify --role judge_document --input input.json --output verdict.json
 uv run kit paperclip setup                # the Paperclip company's requests (paperclip/README.md)
+uv run kit dossier set-codit --cui 41526372 --period 2026-09 --axes axes.json --dossiers /tmp/d
+uv run kit intake spv.zip --cui 41526372 --period 2026-09 --dossiers /tmp/d   # a document in
 uv run kit scenario platitor --period 2026-09 --dossiers /tmp/d   # an invented firm's month
 ```

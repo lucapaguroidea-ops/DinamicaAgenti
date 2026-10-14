@@ -322,6 +322,11 @@ dossiers/{cui}/
 | Control run | (CUI, period, control, snapshot) | stored once |
 | Filing item | (CUI, period, filing) | closed by a receipt only |
 | Backup label | `{cui}:{folder}:{utc}` | a restore of another client is refused |
+| Source | source hash (`sources/{period}/`) | the same document again is a no-op |
+| Books export | export id (`eye/{id}.json`) | stored once; the latest covering a month is its books |
+| CO.DiT | (CUI, period) | set once, never overwritten |
+| Issue facts | (issue, step key) | one write per step: a replayed wake adds nothing |
+| Paperclip link | our issue key | one Paperclip issue per issue |
 
 ## 8. The firm in Paperclip
 
@@ -350,5 +355,20 @@ looked; a webhook's signing secret, shown once, goes to a `0600` file, never to 
 `kit dispatch` is the Dispatcher's process adapter: one wake reads the issue's facts from the
 dossier (`issue_facts`, append-only, one write per key), takes in an answered card, routes, and
 does the step (`kit/dispatch.py`). A held issue is assigned to the accountant with its reason.
-Kit steps run only where an executor reads its inputs from the dossier (today: bind,
-release_lock); any other is held with that reason until its inputs are stored.
+Every kit step is an executor that reads its inputs from the dossier (`kit/steps.py`, WP-18):
+the documents as received (`kit intake` stores and gates a file and writes its batch issue), the
+books exports (`kit dossier add-export`: the kit's reading of SAGA's reports; reading SAGA's own
+export files waits on R4), the CO.DiT per period (`kit dossier set-codit`) and whether the client
+is a test firm (only a test firm binds `draft` rows, P14). The package step refuses with its
+reason (WP-10). A step that cannot run is held for the accountant with the reason. Facts that
+follow from another issue (the close waits while the month's Reconcile is open) are derived on
+every wake, never stored. A question's check reads what it needs from the dossier when it is
+asked, and again when it is answered where the books may have changed (`wait_validare`,
+`need_rj_export`).
+
+A pinned hank goes to its role agent (the Reader's, or the Classifier's for System One and Two)
+as a child issue `hank:{name}:{issue}` that blocks the work issue. The agent's `kit hank-run`
+prepares the input from the facts, reuses verified answers for the same input and card, else
+renders the hank and runs the runtime's one command line, verifies every output, and writes the
+facts back (what failed reads the cautious way); the hank issue closes and the work issue goes
+back to the Dispatcher.

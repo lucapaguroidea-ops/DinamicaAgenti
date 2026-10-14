@@ -4,8 +4,8 @@ On every wake the Dispatcher reads the issue's facts from the client's dossier (
 what kit steps wrote, what ``kit verify`` passed, what people answered, what refused), first
 takes in an answered card, then asks ``kit route`` for the next step and does it:
 
-- **kit**: the step's executor writes its facts; a step with no executor yet is held for a
-  person with that reason (a step never pretends to have run);
+- **kit**: the step's executor (``kit/steps.py``) reads the dossier and writes its facts; a step
+  that cannot run is held for a person with the reason (a step never pretends to have run);
 - **hank**: the hank is rendered with the catalog's pins; while a role is unpinned (D3) it
   refuses, and the refusal is written as the fail-closed fact (a doubtful verdict, a contest, a
   read not confirmed, a suggestion not made), so the route's question goes to a person;
@@ -33,7 +33,8 @@ from kit.hanks import DOUBTFUL, HankRefused, render
 from kit.paperclip import Client
 from kit.questions import answer_question, question_hash
 from kit.route import _ROUTES, Step
-from kit.store import Dossier
+from kit.steps import APPLY, CONTEXT, EXECUTORS, LIVE_CONTEXT, Executor, StepError, derive
+from kit.store import Dossier, StoreError
 
 MAX_STEPS = 12
 DONE_CANCELLED = ("rejected", "failed", "not_emitted")
@@ -59,37 +60,6 @@ class Tick:
     ended: str = ""
 
 
-Executor = Callable[[Catalog, Dossier, str, dict, dict], dict]
-
-
-# ----- kit steps the Dispatcher can run from the dossier today -----
-
-
-def _bind(cat: Catalog, d: Dossier, issue: str, facts: dict, detail: dict) -> dict:
-    art = cat.get("Articol", detail["articol"])
-    doc_class = facts.get("_doc_class")
-    if not doc_class:
-        raise ValueError("bind needs the document's class (_doc_class), written at extraction")
-    mouths = [m for m in art.mouths if cat.get("Mouth", m).doc_class == doc_class]
-    d.set_status(issue.split(":", 1)[1], "bound")
-    return {
-        "bound_articol": art.id,
-        "policy": art.gate.policy,
-        "first_n": art.gate.first_n,
-        "mouths_for_class": len(mouths),
-    }
-
-
-def _release_lock(cat: Catalog, d: Dossier, issue: str, facts: dict, detail: dict) -> dict:
-    d.release_close(issue.split(":")[2])
-    return {"locked": False, "diffed": False, "suggested": False, "v2": None}
-
-
-EXECUTORS: dict[tuple[str, str], Executor] = {
-    ("job", "bind"): _bind,
-    ("close", "release_lock"): _release_lock,
-}
-
 # What a refused hank leaves behind: the cautious reading of no answer (P8).
 REFUSALS: dict[str, Callable[[dict], dict]] = {
     "read-document": lambda f: {"read_runs": f.get("read_runs", 0) + 1, "read_confirmed": False},
@@ -99,36 +69,6 @@ REFUSALS: dict[str, Callable[[dict], dict]] = {
         "contested": list(f.get("contested", [])) + list(f.get("to_review", [])),
     },
     "close-suggest": lambda f: {"suggested": True},
-}
-
-
-# ----- an accepted answer's effect on the route's facts -----
-
-
-def _drop(name: str, key: str = "job_id"):
-    return lambda f, q, a: {name: [x for x in f.get(name, []) if x != q.get(key)]}
-
-
-APPLY: dict[str, Callable[[dict, dict, dict], dict]] = {
-    "v3_approve": lambda f, q, a: {"approval": a["decision"]},
-    "wait_validare": lambda f, q, a: {
-        "validare": "validated" if a["validated"] else "not_validated",
-        "_saga_doc_key": a.get("saga_doc_key"),
-    },
-    "define_articol": lambda f, q, a: {"candidates": [a["articol_id"]]},
-    "decont_split": lambda f, q, a: {
-        "split_answered": True,
-        "question": None,
-        "_parts": a["parts"],
-    },
-    "v2_close": lambda f, q, a: {"v2": a["action"]},
-    "v4_codit": lambda f, q, a: {"v4_done": True},
-    "filing_receipt": lambda f, q, a: {
-        "filings_open": [x for x in f.get("filings_open", []) if x != a["filing_id"]]
-    },
-    "recon_review_contest": _drop("contested"),
-    "recon_ambiguous": _drop("ambiguous"),
-    "recon_how_mismatch": _drop("how_mismatch"),
 }
 
 
@@ -149,7 +89,14 @@ def _title(issue: str, cui: str) -> str:
     return f"{issue} [{cui}]"
 
 
-def ensure_issue(d: Dossier, pc: Client, co: Company, issue: str, parent: str | None = None) -> str:
+def ensure_issue(
+    d: Dossier,
+    pc: Client,
+    co: Company,
+    issue: str,
+    parent: str | None = None,
+    assignee: str = "agent:dispatcher",
+) -> str:
     """The Paperclip issue of one of ours, created once (idempotency key = our key)."""
     pid = d.paperclip_id(issue)
     if pid:
@@ -159,7 +106,7 @@ def ensure_issue(d: Dossier, pc: Client, co: Company, issue: str, parent: str | 
         "title": _title(issue, d.client_cui),
         "status": "todo",
         "projectId": co.id(f"project:{d.client_cui}"),
-        "assigneeAgentId": co.id("agent:dispatcher"),
+        "assigneeAgentId": co.id(assignee),
         "labelIds": [co.id(f"label:{procedure}")],
         "idempotencyKey": f"{d.client_cui}:{issue}",
     }
@@ -167,6 +114,27 @@ def ensure_issue(d: Dossier, pc: Client, co: Company, issue: str, parent: str | 
         body["parentId"] = ensure_issue(d, pc, co, parent)
     out = pc.request("POST", f"/api/companies/{co.id('company')}/issues", body)
     return d.link_issue(issue, out["id"])
+
+
+def _write(
+    d: Dossier, pc: Client, co: Company, issue: str, key: str, source: str, fields: dict
+) -> None:
+    """Store a step's facts; open the issues it names (``_spawn``) and hand the ones it moved
+    back to the Dispatcher (``_wake``): an assignment wakes the assignee (R2)."""
+    spawn, wake = fields.pop("_spawn", []), fields.pop("_wake", [])
+    d.add_facts(issue, key, source, fields)
+    for child, parent in spawn:
+        ensure_issue(d, pc, co, child, parent)
+        wake.append(child)
+    for other in dict.fromkeys(wake):
+        if other != issue:
+            _patch(
+                pc,
+                ensure_issue(d, pc, co, other),
+                status="todo",
+                assigneeAgentId=co.id("agent:dispatcher"),
+                assigneeUserId=None,
+            )
 
 
 def _patch(pc: Client, pid: str, **body) -> None:
@@ -197,7 +165,7 @@ def dispatch(
                 return tick
             continue
         step: Step = _ROUTES[procedure][1](
-            _ROUTES[procedure][0].model_validate(_route_facts(procedure, facts))
+            _ROUTES[procedure][0].model_validate(_route_facts(procedure, derive(d, issue, facts)))
         )
         tick.steps.append(f"{step.kind}:{step.name}")
 
@@ -209,13 +177,16 @@ def dispatch(
                 )
             try:
                 fields = fn(cat, d, issue, facts, step.detail)
-            except (ValueError, KeyError) as exc:
+            except KeyError as exc:
+                why = f"kit step {step.name}: the fact {exc} is not established yet"
+                return _hold(pc, pid, co, tick, why)
+            except (StepError, StoreError, ValueError) as exc:
                 return _hold(pc, pid, co, tick, f"kit step {step.name}: {exc}")
-            d.add_facts(issue, f"kit:{step.name}:{_digest(facts)}", "kit", fields)
+            _write(d, pc, co, issue, f"kit:{step.name}:{_digest(facts)}", "kit", fields)
         elif step.kind == "hank":
             refused = _hank(cat, repo, step, facts)
             if refused is None:
-                return _hold(pc, pid, co, tick, f"{step.name}: kit hank-run is not built yet")
+                return _hand_off(cat, d, pc, co, issue, pid, step, facts, tick)
             d.add_facts(
                 issue, f"refusal:{step.name}:{facts.get('read_runs', 0)}", "refusal", refused
             )
@@ -233,6 +204,8 @@ def dispatch(
         elif step.kind == "hold":
             return _hold(pc, pid, co, tick, step.reason)
         else:
+            if procedure == "job" and step.name in ("rejected", "failed"):
+                d.set_status(facts["job_id"], step.name)
             status = "cancelled" if step.name in DONE_CANCELLED else "done"
             _patch(pc, pid, status=status, comment=f"{step.name}. {step.reason}".strip())
             tick.ended = f"done:{step.name}"
@@ -250,6 +223,57 @@ def _hank(cat: Catalog, repo: Path, step: Step, facts: dict) -> dict | None:
     return None
 
 
+def hank_issue(hank: str, issue: str) -> str:
+    return f"hank:{hank}:{issue}"
+
+
+def _hand_off(cat, d, pc, co, issue, pid, step: Step, facts: dict, tick: Tick) -> Tick:
+    """A pinned hank goes to its role agent as a child issue that blocks this one."""
+    pending = facts.get("_hank")
+    if pending:
+        tick.ended = f"wait:{pending['issue']}"
+        return tick
+    from kit.hankrun import agent_for
+
+    child = hank_issue(step.name, issue)
+    tier = step.detail.get("tier", "everyday")
+    hid = ensure_issue(d, pc, co, child, parent=issue, assignee=agent_for(cat, step.name))
+    d.add_facts(
+        issue,
+        f"hand-off:{child}:{tier}:{facts.get('read_runs', 0)}",
+        "dispatcher",
+        {"_hank": {"name": step.name, "issue": child, "tier": tier}},
+    )
+    _patch(
+        pc,
+        pid,
+        status="blocked",
+        blockedByIssueIds=[hid],
+        comment=f"{step.name} runs on its own issue; this one waits for it.",
+    )
+    tick.ended = f"wait:{child}"
+    return tick
+
+
+def finish_hank(
+    d: Dossier, pc: Client, co: Company, issue: str, hank: str, key: str, fields: dict
+) -> None:
+    """A hank run's verified facts to its work issue; the hank issue closes and the work issue
+    goes back to the Dispatcher (Paperclip also wakes it when its blocker is done)."""
+    _write(d, pc, co, issue, key, "verify", {**fields, "_hank": None})
+    hid = d.paperclip_id(hank_issue(hank, issue))
+    if hid:
+        _patch(pc, hid, status="done", comment="Verified by kit verify; facts written.")
+    _patch(
+        pc,
+        ensure_issue(d, pc, co, issue),
+        status="todo",
+        blockedByIssueIds=[],
+        assigneeAgentId=co.id("agent:dispatcher"),
+        assigneeUserId=None,
+    )
+
+
 def _hold(pc: Client, pid: str, co: Company, tick: Tick, reason: str) -> Tick:
     """A person owns the issue now: assigned to the accountant, with the reason."""
     _patch(
@@ -264,20 +288,20 @@ def _hold(pc: Client, pid: str, co: Company, tick: Tick, reason: str) -> Tick:
     return tick
 
 
-def _question(issue: str, step: Step, facts: dict) -> dict:
+def _question(d: Dossier, issue: str, step: Step, facts: dict) -> dict:
+    """The question as asked: the route's detail, what the steps wrote for it, and what its
+    check needs from the dossier now (``CONTEXT``)."""
     q = {"issue": issue, **step.detail, **facts.get(f"_ask:{step.name}", {})}
-    if step.name == "define_articol":
-        q["choices"] = (
-            {"articol_id": list(step.detail.get("candidates") or [])}
-            if step.detail.get("candidates")
-            else {}
-        )
+    if step.name in CONTEXT:
+        q.update({k: v for k, v in CONTEXT[step.name](d, issue, facts).items() if v is not None})
+    if step.name == "define_articol" and q.get("candidates"):
+        q["choices"] = {"articol_id": list(q["candidates"])}
     return q
 
 
 def _ask(cat, d, issue, pid, pc, co, step: Step, facts: dict, tick: Tick) -> Tick:
     kind = step.name
-    question = _question(issue, step, facts)
+    question = _question(d, issue, step, facts)
     qhash = question_hash(question)
     if any(a["question_hash"] == qhash and a["outcome"] == "accepted" for a in d.answers(issue)):
         return _hold(pc, pid, co, tick, f"{kind} is answered; applying it is not wired yet")
@@ -318,6 +342,8 @@ def _take_answer(cat, d, issue, pid, pc, co, pending: dict, tick: Tick) -> bool:
         tick.steps.append(f"asked again: {exc}")
         tick.ended = f"ask:{kind}"
         return False
+    if kind in LIVE_CONTEXT:  # checked against the dossier as it is now, not as it was asked
+        question = {**question, **CONTEXT[kind](d, issue, d.facts(issue))}
     out = answer_question(cat, d, issue, kind, question, answer, who, actor)
     if out.status != "accepted":
         d.add_facts(issue, f"card-closed:{pending['id']}", "dispatcher", {"_card": None})
@@ -326,8 +352,13 @@ def _take_answer(cat, d, issue, pid, pc, co, pending: dict, tick: Tick) -> bool:
         tick.ended = f"ask:{kind}"
         return False
     effect = APPLY.get(kind)
-    fields = effect(d.facts(issue), question, answer) if effect else {}
-    d.add_facts(issue, f"answer:{pending['id']}", "answer", {**fields, "_card": None})
+    try:
+        fields = effect(cat, d, issue, d.facts(issue), question, answer) if effect else {}
+    except (StepError, StoreError) as exc:
+        d.add_facts(issue, f"answer:{pending['id']}", "answer", {"_card": None})
+        _hold(pc, pid, co, tick, f"{kind} is answered but cannot apply: {exc}")
+        return False
+    _write(d, pc, co, issue, f"answer:{pending['id']}", "answer", {**fields, "_card": None})
     tick.steps.append(f"answered:{kind}")
     if effect is None:
         _hold(pc, pid, co, tick, f"{kind} is answered; applying it is not wired yet")

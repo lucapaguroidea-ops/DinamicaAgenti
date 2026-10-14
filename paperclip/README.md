@@ -6,7 +6,8 @@ The firm around the system (`ARCHITECTURE.md` §8), on `paperclipai@2026.1012.0`
 - **Company:** the cabinet; goal: every client month closed in SAGA C through its gates. Board =
   the owner.
 - **Agents:** Dispatcher (`process` adapter, `uv run kit dispatch`, no model); Reader and
-  Classifier (`process`, `kit hank-run`, which is planned: until D3 every hank refuses anyway); SAGA
+  Classifier (`process`, `kit hank-run` on the hank issue the Dispatcher assigns them; until D3
+  every hank refuses and the Dispatcher writes the refusal itself); SAGA
   import agent (`http` adapter, created paused: a person until the program is built, and a board
   user answers its cards). No model is configured on an agent: a model is pinned per role in
   the catalog (P8), and `kit paperclip setup` refuses a `model` here.

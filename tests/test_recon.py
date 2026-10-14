@@ -173,6 +173,15 @@ def test_the_verdict_names_its_snapshot(cat):
     )
 
 
+def test_a_new_export_of_the_same_books_is_a_new_snapshot(cat):
+    """Found in WP-18: a recheck after the missing month's export must not replay the old
+    need_export (a verdict is stored once per snapshot)."""
+    before = pre(cat, doc(date="2026-08-30"), witness([]))
+    after = pre(cat, doc(date="2026-08-30"), Witness(covered=["2026-08", "2026-09"]))
+    assert before.verdict == "need_export" and after.verdict == "absent"
+    assert before.snapshot_id != after.snapshot_id
+
+
 # ----- POST -----
 
 

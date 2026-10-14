@@ -2,7 +2,7 @@
 
 Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``,
 ``kit route``, ``kit scenario``, ``kit hank``, ``kit verify``, ``kit paperclip``,
-``kit dispatch``. A command named in
+``kit dispatch``, ``kit dossier``, ``kit intake``, ``kit hank-run``. A command named in
 ``ARCHITECTURE.md`` and not built yet refuses until its work package is done (``BUILD.md``): a
 command that is not built never pretends to work.
 """
@@ -27,9 +27,7 @@ from kit.synthetic import FIRMS
 from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
-PLANNED = {
-    "hank-run": "next: write a run's input.json from the dossier, run the hank, kit verify it",
-}
+PLANNED: dict[str, str] = {}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,6 +98,28 @@ def main(argv: list[str] | None = None) -> int:
     dp.add_argument("--state", type=Path, help="default: POARTA_PAPERCLIP_STATE")
     dp.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
     dp.add_argument("--catalog", type=Path, default=Path("catalog"))
+    ds = sub.add_parser("dossier", help="what a client's dossier holds: CO.DiT, exports, test firm")
+    ds.add_argument("action", choices=["set-codit", "add-export", "mark-test-firm"])
+    ds.add_argument("--cui", required=True)
+    ds.add_argument("--dossiers", type=Path, help="default: POARTA_DOSSIERS")
+    ds.add_argument("--period", help="set-codit: YYYY-MM")
+    ds.add_argument("--axes", type=Path, help="set-codit: the axes (JSON object)")
+    ds.add_argument("--export-id", help="add-export: its id (slug)")
+    ds.add_argument("--file", type=Path, help="add-export: the books as the kit reads them (JSON)")
+    ds.add_argument("--catalog", type=Path, default=Path("catalog"))
+    ik = sub.add_parser("intake", help="a document in: stored, gated, its batch issue's facts")
+    ik.add_argument("file", type=Path)
+    ik.add_argument("--cui", required=True)
+    ik.add_argument("--period", required=True)
+    ik.add_argument("--dossiers", type=Path, help="default: POARTA_DOSSIERS")
+    ik.add_argument("--catalog", type=Path, default=Path("catalog"))
+    hr = sub.add_parser("hank-run", help="a role agent's run of the hank its issue names")
+    hr.add_argument("--issue", help="the hank issue's key (default: from PAPERCLIP_TASK_ID)")
+    hr.add_argument("--cui", help="the client (default: from the issue's title)")
+    hr.add_argument("--dossiers", type=Path, help="default: POARTA_DOSSIERS")
+    hr.add_argument("--state", type=Path, help="default: POARTA_PAPERCLIP_STATE")
+    hr.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
+    hr.add_argument("--catalog", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -123,6 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         return _read(args)
     if args.cmd == "answer":
         return _answer(args)
+    if args.cmd == "dossier":
+        return _dossier(args)
+    if args.cmd == "intake":
+        return _intake(args)
+    if args.cmd == "hank-run":
+        return _hank_run(args)
     if args.cmd == "paperclip":
         return _paperclip(args)
     if args.cmd == "dispatch":
@@ -221,35 +247,181 @@ def _paperclip(args: argparse.Namespace) -> int:
     return 0
 
 
-def _dispatch(args: argparse.Namespace) -> int:
-    """One wake. Exit 0 when the issue was routed (whatever the step); 1 on an error."""
+def _dossiers(args: argparse.Namespace) -> Path:
+    import os
+
+    if args.dossiers:
+        return args.dossiers
+    if not os.environ.get("POARTA_DOSSIERS"):
+        raise ValueError("give --dossiers or set POARTA_DOSSIERS")
+    return Path(os.environ["POARTA_DOSSIERS"])
+
+
+def _dossier(args: argparse.Namespace) -> int:
+    from kit.recon import Witness
+    from kit.steps import StepError, axes_for
+
+    try:
+        d = open_dossier(_dossiers(args), args.cui)
+        if args.action == "mark-test-firm":
+            d.mark_test_firm()
+        elif args.action == "set-codit":
+            if not args.period or not args.axes:
+                raise ValueError("set-codit needs --period and --axes")
+            axes = json.loads(args.axes.read_text(encoding="utf-8"))
+            cat = load_catalog(args.catalog)
+            missing = sorted(set(cat.ids("Axis")) - set(axes))
+            if missing:
+                raise ValueError(f"the CO.DiT names every axis: missing {missing}")
+            d.set_codit(args.period, axes)
+            axes_for(cat, d, args.period)  # every value is the catalog's
+        else:
+            if not args.export_id or not args.file:
+                raise ValueError("add-export needs --export-id and --file")
+            body = json.loads(args.file.read_text(encoding="utf-8"))
+            w = Witness.model_validate({k: v for k, v in body.items() if k != "balances"})
+            d.put_export(args.export_id, list(w.covered), body)
+    except (CatalogError, StoreError, StepError, ValueError, OSError) as err:
+        print(f"kit dossier: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps({"cui": d.client_cui, "action": args.action, "ok": True}))
+    return 0
+
+
+def _intake(args: argparse.Namespace) -> int:
+    from kit.steps import intake
+
+    try:
+        d = open_dossier(_dossiers(args), args.cui)
+        issue, facts = intake(
+            load_catalog(args.catalog), d, args.period, args.file.name, args.file.read_bytes()
+        )
+    except (CatalogError, StoreError, ValueError, OSError) as err:
+        print(f"kit intake: {err}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "issue": issue,
+                "emit": facts["emit"],
+                "failed": facts["failed"],
+                "question": facts["question"],
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+def _woken(client, args) -> tuple[str, str]:
+    """Our issue key and client from the arguments, or from the woken Paperclip issue."""
     import os
     import re
 
-    from kit.dispatch import Company, dispatch
-    from kit.paperclip import HttpClient, PaperclipError, SetupError, load_state
+    from kit.paperclip import SetupError
+
+    if args.issue and args.cui:
+        return args.issue, args.cui
+    task = os.environ.get("PAPERCLIP_TASK_ID")
+    if not task:
+        raise SetupError("no issue: give --issue and --cui, or wake with PAPERCLIP_TASK_ID")
+    title = client.request("GET", f"/api/issues/{task}")["title"]
+    m = re.fullmatch(r"([a-z]+:[^ \[]+) \[(\d+)\]", title.strip())
+    if not m:
+        raise SetupError(f"{title!r} is not an issue of the kit (key [cui])")
+    return m.group(1), m.group(2)
+
+
+def _company(args):
+    import os
+
+    from kit.dispatch import Company
+    from kit.paperclip import SetupError, load_state
+
+    state = args.state or Path(os.environ.get("POARTA_PAPERCLIP_STATE", ""))
+    if not state.is_file():
+        raise SetupError(f"{state}: run kit paperclip setup --apply first")
+    co = Company(load_state(state), os.environ.get("ACCOUNTANT_USER_ID", ""))
+    if not co.accountant_user_id:
+        raise SetupError("set ACCOUNTANT_USER_ID: a held issue goes to a person")
+    return co
+
+
+def _hank_run(args: argparse.Namespace) -> int:
+    """One run of a hank for its work issue. Exit 0 when the facts were written (whatever the
+    model answered); 3 when a role is unpinned (the refusal is written); 1 on an error."""
+    from kit.dispatch import REFUSALS, finish_hank
+    from kit.hankrun import run_hank
+    from kit.hanks import HankError, HankRefused
+    from kit.paperclip import HttpClient, PaperclipError, SetupError
+    from kit.steps import StepError
 
     try:
-        dossiers = args.dossiers or Path(os.environ["POARTA_DOSSIERS"])
-        state = args.state or Path(os.environ["POARTA_PAPERCLIP_STATE"])
         client = HttpClient.from_env()
-        issue, cui = args.issue, args.cui
-        if not issue or not cui:
-            task = os.environ.get("PAPERCLIP_TASK_ID")
-            if not task:
-                raise SetupError("no issue: give --issue and --cui, or wake with PAPERCLIP_TASK_ID")
-            title = client.request("GET", f"/api/issues/{task}")["title"]
-            m = re.fullmatch(r"([a-z]+:[^ \[]+) \[(\d+)\]", title.strip())
-            if not m:
-                raise SetupError(f"{title!r} is not an issue of the kit (key [cui])")
-            issue, cui = m.group(1), m.group(2)
-        if not state.exists():
-            raise SetupError(f"{state}: run kit paperclip setup --apply first")
-        co = Company(load_state(state), os.environ.get("ACCOUNTANT_USER_ID", ""))
-        if not co.accountant_user_id:
-            raise SetupError("set ACCOUNTANT_USER_ID: a held issue goes to a person")
+        key, cui = _woken(client, args)
+        _, hank, issue = key.split(":", 2)
+        co, d = _company(args), open_dossier(_dossiers(args), cui)
+        cat = load_catalog(args.catalog)
+        tier = (d.facts(issue).get("_hank") or {}).get("tier", "everyday")
+        try:
+            run = run_hank(cat, args.root, d, hank, issue, tier=tier)
+        except HankRefused as refused:
+            finish_hank(
+                d,
+                client,
+                co,
+                issue,
+                hank,
+                f"refusal:{hank}:{refused.roles}",
+                REFUSALS[hank](d.facts(issue)),
+            )
+            print(f"kit hank-run: refused: {refused}", file=sys.stderr)
+            return 3
+        finish_hank(d, client, co, issue, hank, f"hank:{hank}:{len(d.facts(issue))}", run.fields)
+    except (
+        SetupError,
+        PaperclipError,
+        CatalogError,
+        StoreError,
+        StepError,
+        HankError,
+        KeyError,
+        ValueError,
+        OSError,
+    ) as err:
+        print(f"kit hank-run: {err}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "hank": hank,
+                "issue": issue,
+                "ran": run.ran,
+                "ok": {c: v.ok for c, v in run.verified.items()},
+                "problems": {c: v.problems for c, v in run.verified.items() if v.problems},
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+def _dispatch(args: argparse.Namespace) -> int:
+    """One wake. Exit 0 when the issue was routed (whatever the step); 1 on an error."""
+    from kit.dispatch import dispatch
+    from kit.paperclip import HttpClient, PaperclipError, SetupError
+
+    try:
+        client = HttpClient.from_env()
+        issue, cui = _woken(client, args)
+        co = _company(args)
         tick = dispatch(
-            load_catalog(args.catalog), args.root, open_dossier(dossiers, cui), issue, client, co
+            load_catalog(args.catalog),
+            args.root,
+            open_dossier(_dossiers(args), cui),
+            issue,
+            client,
+            co,
         )
     except (
         SetupError,

@@ -25,7 +25,8 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-15 | done | R2 confirmed, D2 | Paperclip company: roles, labels, routines, budgets, the Dispatcher |
 | WP-16 | done | WP-13 | Invented firms (five client types) and end-to-end scenarios |
 | WP-17 | todo | WP-10, WP-16 | Loop 0 in a SAGA C test firm |
-| WP-18 | todo | WP-15, D4 | Sources and books exports in the dossier; every kit step an executor of the Dispatcher; `kit hank-run` (render, input, run, `kit verify`) |
+| WP-19 | todo | R4 | SAGA export reader: registru jurnal, balanță, purchase / sales journals → a books export (`kit dossier add-export` reads SAGA's files, not the kit's JSON) |
+| WP-18 | done | WP-15 | Sources and books exports in the dossier; every kit step an executor of the Dispatcher; `kit hank-run` (render, input, run, `kit verify`) |
 
 ## Decisions (owner)
 
