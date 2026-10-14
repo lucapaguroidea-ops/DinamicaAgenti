@@ -1,0 +1,64 @@
+{
+  "$schema": "https://unpkg.com/hankweave@0.12.0/schemas/hank.schema.json",
+  "meta": {
+    "name": "judge-document",
+    "version": "0.1.0",
+    "description": "System One judges the document; System Two explains the approval question."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 0.3,
+      "maxTimeSeconds": 480,
+      "onExceeded": "fail"
+    }
+  },
+  "globalSystemPromptFile": "prompts/system.md",
+  "hank": [
+    {
+      "id": "judge",
+      "name": "Judge the document",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/judge.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/verdict.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.2,
+        "maxTimeSeconds": 300,
+        "onExceeded": "fail"
+      }
+    },
+    {
+      "id": "explain",
+      "name": "Explain the question",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/explain.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/explain.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.1,
+        "maxTimeSeconds": 180,
+        "onExceeded": "fail"
+      }
+    }
+  ]
+}

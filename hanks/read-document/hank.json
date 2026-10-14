@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/hankweave@0.12.0/schemas/hank.schema.json",
+  "meta": {
+    "name": "read-document",
+    "version": "0.1.0",
+    "description": "Reader: copy the header and tables of a scan or statement PDF that has no XML or text layer."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 0.5,
+      "maxTimeSeconds": 600,
+      "onExceeded": "fail"
+    }
+  },
+  "globalSystemPromptFile": "prompts/system.md",
+  "hank": [
+    {
+      "id": "read",
+      "name": "Read the document",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/read.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/read.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.5,
+        "maxTimeSeconds": 600,
+        "onExceeded": "fail"
+      }
+    }
+  ]
+}

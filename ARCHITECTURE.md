@@ -35,7 +35,8 @@ The **Dispatcher** runs `kit route <issue>` after every event and acts on its an
 Runtime (Apache-2.0, TypeScript). A hank (`hank.json`) is a declared sequence of codons, each one
 sealed agent run with a pinned `model`, a prompt file, `continuationMode: "fresh"`,
 `checkpointedFiles` and a `budget`; rigs prepare the workspace; loops repeat codons up to a
-`terminateOn` limit; input is mounted read-only; every codon boundary is a git checkpoint; every
+`terminateOn` limit (an iteration count or context exhausted, never a computed condition); input
+is mounted read-only; every codon boundary is a git checkpoint; every
 tool call goes to the event journal. Facts: `RESEARCH_LOG.md` R1.
 
 A hank runs only where a model works, is short, ends by writing a JSON file, and decides nothing.
@@ -266,10 +267,18 @@ codon's prompt file; the card's hash is recorded with every call and is part of 
 | `split-container` | Reader | propose parts → `parts.json`; a person confirms (`decont_split`) |
 | `judge-document` | One + Two | judge → `verdict.json`; explain the approval question → `explain.json` |
 | `review-match` | One | confirm / contest / abstain on PRE → `review.json` |
-| `close-suggest` | One + Two | suggest → `suggest.json`; explain; draft a rule if unexplained documents remain |
+| `close-suggest` | One + Two | suggest → `suggest.json`; explain → `explain.json`; draft rules for unexplained documents → `rule.json` |
 
 Each hank mounts its inputs read-only, writes only to its execution directory, has a `budget`
 per codon, and is run with `--max-cost` and `--max-time`. A hank never touches the dossier store.
+
+Built in `kit/hanks.py` (WP-14). The hank folders hold the placeholder model `unpinned`;
+`kit hank render` writes a run with each codon's model from its role row and refuses the hank
+while a role is unpinned. `kit verify` checks a codon's file against the role's `answer` shape
+and its own check (a statement ties and is the client's; a part is a file of the container; a
+cited fact is in the input; a review keeps its Job; a rule matches an unexplained document). A
+refused judge reads as `{accounts_ok: false, risk: unknown, needs_human: true}`; a suggestion on
+a material month keeps no `file`.
 
 ## 7. The dossier store
 

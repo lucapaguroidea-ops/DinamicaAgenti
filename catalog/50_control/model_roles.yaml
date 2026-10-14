@@ -1,5 +1,6 @@
 # Model roles (ARCHITECTURE §6). model stays unset until D3: an unset role refuses and a person
-# is asked (P8). card is the codon's prompt file.
+# is asked (P8). card is the codon's prompt file; output is the one file the codon writes, and
+# answer its shape in the questions grammar (kit/questions.py), checked by `kit verify`.
 catalog: ModelRole
 file_schema: 1
 rows:
@@ -9,45 +10,79 @@ rows:
     hank: read-document
     codon: read
     card: hanks/read-document/prompts/read.md
+    output: read.json
+    answer:
+      doc_type: enum(statement|invoice)
+      statement: "{holder_cui: str, iban: str, currency: str, period_from: str, period_to: str, opening: str, closing: str, lines: list[{date: str, description: str, debit: str, credit: str, counterparty: str?}]}?"
+      invoice: "{number: str, date: str, seller_cui: str, buyer_cui: str, currency: str, net: str, vat: str, gross: str}?"
+  - id: reader_document_strong
+    status: draft
+    system: reader
+    hank: read-document
+    codon: read
+    tier: strong
+    card: hanks/read-document/prompts/read.md
+    output: read.json
+    answer:
+      doc_type: enum(statement|invoice)
+      statement: "{holder_cui: str, iban: str, currency: str, period_from: str, period_to: str, opening: str, closing: str, lines: list[{date: str, description: str, debit: str, credit: str, counterparty: str?}]}?"
+      invoice: "{number: str, date: str, seller_cui: str, buyer_cui: str, currency: str, net: str, vat: str, gross: str}?"
+    note: The second read when the first is not confirmed (ARCHITECTURE §4.2, step 1).
   - id: reader_split
     status: draft
     system: reader
     hank: split-container
     codon: propose
     card: hanks/split-container/prompts/propose.md
+    output: parts.json
+    answer:
+      parts: "list[{part_hash: sha256, source_doc_id: slug, kinds: list[slug], bon_our_cui_on_doc: bool?, counterparty_cui: cui?}]"
   - id: judge_document
     status: draft
     system: one
     hank: judge-document
     codon: judge
     card: hanks/judge-document/prompts/judge.md
+    output: verdict.json
+    answer: {accounts_ok: bool, risk: enum(low|medium|high|unknown), needs_human: bool}
   - id: explain_approve
     status: draft
     system: two
     hank: judge-document
     codon: explain
     card: hanks/judge-document/prompts/explain.md
+    output: explain.json
+    answer: {explanation: str, facts_cited: "list[str]", missing: "list[str]"}
   - id: review_match
     status: draft
     system: one
     hank: review-match
     codon: review
     card: hanks/review-match/prompts/review.md
+    output: review.json
+    answer: {job_id: str, decision: enum(confirm|contest|abstain), reason: str}
   - id: close_suggest
     status: draft
     system: one
     hank: close-suggest
     codon: suggest
     card: hanks/close-suggest/prompts/suggest.md
+    output: suggest.json
+    answer: {action: enum(file|hold|patch_maps|reopen), books_support_declaration: bool, reason: str}
   - id: explain_close
     status: draft
     system: two
     hank: close-suggest
     codon: explain
     card: hanks/close-suggest/prompts/explain.md
+    output: explain.json
+    answer: {explanation: str, facts_cited: "list[str]", missing: "list[str]"}
   - id: draft_rule
     status: draft
     system: two
     hank: close-suggest
     codon: draft_rule
     card: hanks/close-suggest/prompts/draft_rule.md
+    output: rule.json
+    answer:
+      rules: "list[{rule_id: slug, kind: enum(document|line), partner_cui: cui?, doc_class: slug?, number_prefix: str?, account: str?}]"

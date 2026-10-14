@@ -245,12 +245,33 @@ class QuestionKindRow(Row):
     answer: dict[Slug, str] = Field(min_length=1)
 
 
+# A pin names one exact model: no alias, no "latest", no router (P8, ARCHITECTURE §6).
+ALIASES = frozenset(
+    {"auto", "default", "opus", "sonnet", "haiku", "flash", "pro", "gemini-flash", "best"}
+)
+
+
 class ModelRoleRow(Row):
     system: Literal["one", "two", "reader"]
-    hank: str = Field(min_length=1)
+    hank: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9-]*$")]
     codon: Slug
+    tier: Literal["everyday", "strong"] = "everyday"
     model: str | None = None  # unset: the role refuses and a person is asked (P8)
-    card: str | None = None
+    card: str = Field(min_length=1)
+    output: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*\.json$")]
+    answer: dict[Slug, str] = Field(min_length=1)  # the output's shape (kit.questions grammar)
+
+    @field_validator("model")
+    @classmethod
+    def _exact(cls, v: str | None):
+        if v is None:
+            return v
+        bare = v.strip().lower()
+        if bare in ALIASES or "latest" in bare or bare != v or not any(c.isdigit() for c in v):
+            raise ValueError(
+                f"model {v!r} is not an exact model id: no alias, no 'latest', no router (P8)"
+            )
+        return v
 
 
 CATALOGS: dict[str, type[Row]] = {
@@ -398,6 +419,16 @@ def load_catalog(root: Path) -> Catalog:
             art = catalog["Articol"].get(aid)
             if art is not None and art.procedure != "document":
                 problems.append(f"JobKind {job.id!r}: articol {aid!r} is not on the document path")
+
+    slots: dict[tuple[str, str, str], str] = {}
+    for role in catalog["ModelRole"].values():
+        slot = (role.hank, role.codon, role.tier)
+        if slot in slots:
+            problems.append(
+                f"ModelRole {role.id!r}: hank {role.hank} codon {role.codon} tier {role.tier}"
+                f" is already {slots[slot]!r}: one role per codon and tier"
+            )
+        slots.setdefault(slot, role.id)
 
     axes = {a.id: set(a.values) for a in catalog["Axis"].values()}
     for kind, rows in catalog.items():

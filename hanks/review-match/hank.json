@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/hankweave@0.12.0/schemas/hank.schema.json",
+  "meta": {
+    "name": "review-match",
+    "version": "0.1.0",
+    "description": "System One confirms, contests or abstains on the kit's PRE verdict."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 0.1,
+      "maxTimeSeconds": 180,
+      "onExceeded": "fail"
+    }
+  },
+  "globalSystemPromptFile": "prompts/system.md",
+  "hank": [
+    {
+      "id": "review",
+      "name": "Review the PRE verdict",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/review.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/review.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.1,
+        "maxTimeSeconds": 180,
+        "onExceeded": "fail"
+      }
+    }
+  ]
+}

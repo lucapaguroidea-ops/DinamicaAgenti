@@ -41,13 +41,40 @@ Confirmed from the example `hank.json`:
   sentinels watch the event stream in parallel; budgets for cost, time and tokens.
 - CLI: `bunx hankweave`; `bunx hankweave ./hank.json ./my-data`; `--max-cost`, `--max-time`, `-m`.
 
-**To confirm** on the documentation site before WP-14:
+**Confirmed 2026-10-14** from the published package itself: npm `hankweave@0.12.0` (published
+2026-09-18; tarball sha1 `2fcb142641cc80cf6dbe4f2dcdb8aa6c9e976668`, integrity
+`sha512-L5zWmVZRZywhpgGsIX2Aje8r2NfSKrEevq5eBQns/o0B0yON3YCMPM4OL9+SaSonHGtQKOs/496oRrHCF+eNPw==`,
+Apache-2.0). Its `schemas/hank.schema.json` is vendored unchanged in `hanks/schema/` (sha256
+`bc7127748a350a9888ceeab5bdbcb6f9f308e3f22d2894ae21426fbca863fe91`); the CLI help was read from
+the installed runtime. The documentation site is still unreachable from the session.
 
-- `rigSetup` on a codon, with `copy` (`{ "type": "copy", "copy": { "from", "to" } }`) and command
-  operations; whether a failing command stops the codon.
-- `terminateOn` types beyond `iterationLimit` and `contextExceeded`; whether a loop can end on a
-  condition a command computes.
-- How a run is resumed from a checkpoint (CLI).
+- **Closed schema.** The hank file, a codon, a loop, a budget, a rig operation and an output step
+  all have `additionalProperties: false`. A codon requires `id`, `name`, `model`,
+  `continuationMode` (`fresh` | `continue-previous`); `model` is a non-empty string.
+- **`rigSetup`** (codon): operations `{type: "copy", copy: {from, to}}` (from: relative, inside
+  the hank directory, no `..`, no symlinks) and `{type: "command", command: {run,
+  workingDirectory: project | lastCopied}}`, each with `allowFailure` (default false): "Each
+  operation must complete successfully for codon to start." A failing operation fails the codon
+  unless `allowFailure` or the run flag `--ignore-rig-failures`.
+- **`terminateOn`** (loop): only `{type: "iterationLimit", limit}` and `{type:
+  "contextExceeded"}`. A loop cannot end on a condition a command computes: the kit's checks run
+  after the run, never as a loop condition.
+- **`outputFiles`**: `[{copy: [globs], beforeCopy?: [command]}]`, copied after the codon
+  completes. **`onFailure`**: `abort` (default) | `retry` (with `retryConfig`) | `ignore`.
+  **`budget`** (codon): `maxDollars`, `maxTimeSeconds`, `maxOutputTokens`, `maxContextTokens`,
+  `onExceeded: complete | fail`; the hank's `overrides.budget` adds `allocation` and `shares`.
+- **Resume:** `hankweave --execution <path>` "creates if doesn't exist, resumes if has state";
+  `--start-new` never resumes; `--replay <path>` replays from recorded logs with no LLM calls.
+- **Run flags:** `--headless`, `--max-cost`, `--max-time`, `--output <path>`, `--validate`
+  (validate without running). Flags that defeat a gate here: `-m/--model` (overrides every
+  codon's model), `--ignore-rig-failures`, `-f/--force` (overrides hash checks): the kit never
+  passes them (`kit/hanks.py`, `NEVER_PASSED`).
+- **`--validate` was run** on the five hanks: with the placeholder model `unpinned` the runtime
+  refuses ("Model 'unpinned' not found in registry"); with an exact id in a scratch copy the
+  hank file passes and only the provider self-test fails (no API key in the session); an
+  unknown codon field fails as "Invalid hank file".
+- Also seen, not used yet: `hankweave pack` makes a deterministic `.hank` bundle with a
+  `hank.lock` (a hash per bundle); per-codon `sentinels`; `env`; `archiveOnSuccess`.
 
 ## R2 · Paperclip (read 2026-10-07)
 

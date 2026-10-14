@@ -1,8 +1,9 @@
 """``kit``: the gate kit's command line, run by the Dispatcher and by hank rigs.
 
 Built so far: ``kit cui``, ``kit catalog``, ``kit emit``, ``kit read``, ``kit answer``,
-``kit route``, ``kit scenario``. The other commands are named in ``ARCHITECTURE.md`` and refuse
-until their work package is done (``BUILD.md``): a command that is not built never pretends to work.
+``kit route``, ``kit scenario``, ``kit hank``, ``kit verify``. A command named in
+``ARCHITECTURE.md`` and not built yet refuses until its work package is done (``BUILD.md``): a
+command that is not built never pretends to work.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from pathlib import Path
 
 from kit import __version__
 from kit.catalog import CatalogError, load_catalog
+from kit.hanks import HankError, HankRefused, card_hash, check_hank, input_hash, render, verify
+from kit.hanks import command as hank_command
 from kit.questions import AnswerError, answer_question
 from kit.route import route
 from kit.scenario import DEFECTS, ScenarioError, run_month
@@ -24,7 +27,7 @@ from kit.types import cui_is_valid, normalize_cui
 from kit.ubl import UblError, for_client, parse_ubl, read_spv_zip
 
 PLANNED = {
-    "verify": "WP-14: check a hank's output file before it becomes a fact",
+    "prepare": "WP-15: write a hank run's input.json from the dossier, for the Dispatcher",
 }
 
 
@@ -65,6 +68,23 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--eu-service", action="store_true", help="add a service bought from the EU")
     sc.add_argument("--seed", type=int, default=7)
     sc.add_argument("--catalog", type=Path, default=Path("catalog"))
+    h = sub.add_parser("hank", help="check the hanks, or render a run with the catalog's pins")
+    h.add_argument("action", choices=["check", "render"])
+    h.add_argument("name", nargs="?", help="the hank (render)")
+    h.add_argument("--run", type=Path, help="the run directory to write (render)")
+    h.add_argument("--tier", choices=["everyday", "strong"], default="everyday")
+    h.add_argument("--data", type=Path, help="with --out: print the runtime's command line")
+    h.add_argument("--out", type=Path)
+    h.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
+    h.add_argument("--catalog", type=Path, default=Path("catalog"))
+    v = sub.add_parser("verify", help="check a codon's output file before it becomes a fact")
+    v.add_argument("--role", required=True, help="the model role (catalog row)")
+    v.add_argument("--input", type=Path, required=True, help="the run's input.json")
+    v.add_argument("--output", type=Path, required=True, help="the file the codon wrote")
+    v.add_argument("--dossiers", type=Path, help="store a passing answer in the client's dossier")
+    v.add_argument("--cui", help="the client's CUI (with --dossiers)")
+    v.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
+    v.add_argument("--catalog", type=Path, default=Path("catalog"))
     for name, why in PLANNED.items():
         sub.add_parser(name, help=f"not built yet ({why})")
     args = ap.parse_args(argv)
@@ -88,6 +108,10 @@ def main(argv: list[str] | None = None) -> int:
         return _read(args)
     if args.cmd == "answer":
         return _answer(args)
+    if args.cmd == "hank":
+        return _hank(args)
+    if args.cmd == "verify":
+        return _verify(args)
     if args.cmd == "scenario":
         return _scenario(args)
     if args.cmd == "route":
@@ -132,6 +156,74 @@ def _emit(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0
+
+
+def _hank(args: argparse.Namespace) -> int:
+    """check: exit 0 when every hank fits its role rows. render: exit 0 with the run written;
+    3 when a role has no pinned model (the hank refuses, a person is asked); 1 on an error."""
+    try:
+        cat = load_catalog(args.catalog)
+        if args.action == "check":
+            hanks = sorted({cat.get("ModelRole", r).hank for r in cat.ids("ModelRole")})
+            bad = {n: p for n in hanks if (p := check_hank(cat, args.root, n))}
+            for n, problems in bad.items():
+                print(f"{n}: " + "; ".join(problems), file=sys.stderr)
+            if not bad:
+                print("\n".join(f"{n} ok" for n in hanks))
+            return 1 if bad else 0
+        if not args.name or not args.run:
+            print("kit hank render: name and --run are required", file=sys.stderr)
+            return 1
+        r = render(cat, args.root, args.name, args.run, args.tier)
+        out: dict = {
+            "hank": r.hank,
+            "run_dir": str(r.run_dir),
+            "models": r.models,
+            "roles": r.roles,
+            "card_hashes": r.card_hashes,
+        }
+        if args.data and args.out:
+            out["command"] = hank_command(r, args.data, args.out)
+    except HankRefused as refused:
+        print(f"kit hank: refused: {refused}", file=sys.stderr)
+        return 3
+    except (CatalogError, HankError, KeyError, OSError) as err:
+        print(f"kit hank: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _verify(args: argparse.Namespace) -> int:
+    """Print the check of a codon's file; exit 0 when it passes (and is stored with
+    --dossiers), 1 when it is refused: the body printed is then the fallback fact, if any."""
+    try:
+        cat = load_catalog(args.catalog)
+        inp = json.loads(args.input.read_text(encoding="utf-8"))
+        output = args.output.read_bytes() if args.output.exists() else None
+        result = verify(cat, args.role, inp, output)
+        stored = False
+        if result.ok and args.dossiers is not None:
+            if not args.cui:
+                raise ValueError("--dossiers needs --cui")
+            role = cat.get("ModelRole", args.role)
+            dossier = open_dossier(args.dossiers, args.cui)
+            dossier.put_model_answer(
+                role.id, input_hash(inp), card_hash(args.root, role), result.body
+            )
+            stored = True
+    except (CatalogError, StoreError, KeyError, ValueError, OSError) as err:
+        print(f"kit verify: {err}", file=sys.stderr)
+        return 1
+    out = {
+        "role": result.role_id,
+        "ok": result.ok,
+        "body": result.body,
+        "problems": result.problems,
+        "stored": stored,
+    }
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0 if result.ok else 1
 
 
 def _scenario(args: argparse.Namespace) -> int:

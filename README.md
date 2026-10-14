@@ -40,10 +40,10 @@ folder layout, the catalog rows (all `draft`) and the first pieces of the gate k
 check digit, the catalog loader, Sorting (the emit gates), the e-invoice reader (UBL, XML
 first), the dossier store (SQLite per client), PRE / POST matching with the settlement
 proposal, the period difference with the month's controls, questions with their answer log,
-the router, and end-to-end scenarios on five invented firms (`kit scenario`: a month through
+the router, the five hanks with `kit verify` (every model role refuses until D3), and
+end-to-end scenarios on five invented firms (`kit scenario`: a month through
 Sorting and the document path up to the package, then its close against a simulated book). No
-SAGA export reader, XML renderer or hank is written yet; no model is pinned
-(D3). Next: `BUILD.md`.
+SAGA export reader or XML renderer is written yet; no model is pinned (D3). Next: `BUILD.md`.
 
 ## Where things are
 
@@ -72,5 +72,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run kit cui RO41526372                 # check a CUI's check digit
 uv run kit catalog                        # load and check the catalog
 uv run kit read spv.zip --client RO41526372   # read an e-invoice (XML first), inbound or outbound
+uv run kit hank check                     # the hanks fit their role rows
+uv run kit verify --role judge_document --input input.json --output verdict.json
 uv run kit scenario platitor --period 2026-09 --dossiers /tmp/d   # an invented firm's month
 ```

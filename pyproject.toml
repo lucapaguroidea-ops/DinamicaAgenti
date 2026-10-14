@@ -10,7 +10,11 @@ dependencies = ["defusedxml>=0.7", "pydantic>=2.7", "pyyaml>=6"]
 kit = "kit.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = [
+    "jsonschema>=4.22",
+    "pytest>=8",
+    "ruff>=0.6",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -208,7 +208,7 @@ def period_diff(
                 )
             )
             continue
-        rule = next((r for r in rules if r.kind == "document" and _doc_rule(r, d)), None)
+        rule = next((r for r in rules if r.kind == "document" and doc_rule_matches(r, d)), None)
         if rule is not None:
             buckets.append(
                 BucketRow(
@@ -352,7 +352,7 @@ def period_diff(
     )
 
 
-def _doc_rule(r: ExplainedRule, d: SinkDoc) -> bool:
+def doc_rule_matches(r: ExplainedRule, d: SinkDoc) -> bool:
     return (
         (r.partner_cui is None or r.partner_cui == d.partner_cui)
         and (r.doc_class is None or r.doc_class == d.doc_class)

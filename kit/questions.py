@@ -282,6 +282,11 @@ class Outcome:
     question: dict  # the question as asked next: with ``error`` when asked again
 
 
+def check_record(value: Any, shape: dict[str, str]) -> list[str]:
+    """Every way ``value`` misses a closed record shape (a catalog row's ``answer``)."""
+    return _record(value, {f: parse_type(e) for f, e in shape.items()}, "")
+
+
 def answer_question(
     cat: Catalog,
     dossier: Dossier,
@@ -298,7 +303,7 @@ def answer_question(
     if row.actor == "saga_agent" and actor != "saga_agent":
         raise AnswerError(f"{kind} is a question for the SAGA agent")
     qhash = question_hash(question)
-    errors = _record(answer, {f: parse_type(e) for f, e in row.answer.items()}, "")
+    errors = check_record(answer, row.answer)
     error = "; ".join(errors) if errors else None
     if error is None and kind in CHECKS:
         error = CHECKS[kind](cat, question, answer)

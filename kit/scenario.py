@@ -17,15 +17,17 @@ from pathlib import Path
 
 from kit.bind import candidates
 from kit.catalog import Catalog
+from kit.hanks import DOUBTFUL, HankRefused, render
 from kit.period import ExpectedItem, PeriodDiff, expected_set_hash, period_diff
 from kit.questions import answer_question
 from kit.recon import Doc, JournalLine, SinkDoc, Witness, pick_profile, pre_check
-from kit.route import CloseFacts, JobFacts, route_close, route_job
+from kit.route import CloseFacts, JobFacts, Verdict, route_close, route_job
 from kit.sorting import Pack, decide, split
 from kit.store import Dossier, open_dossier
 from kit.synthetic import FIRMS, SUPPLIERS, Firm, GenDoc, booked, month, simulated_book
 from kit.ubl import for_client, parse_ubl, read_spv_zip
 
+REPO = Path(__file__).resolve().parents[1]
 DEFECTS = ("missing_in_books", "extra_in_books", "cent_off")
 PERSON = "Contabil (simulated)"
 
@@ -121,15 +123,11 @@ def _walk_job(cat: Catalog, d: Dossier, firm: Firm, pack: Pack, xml: bytes, trai
             d.put_verdict(job.job_id, "pre", r.snapshot_id, r.verdict, r.model_dump())
             upd = {"pre_verdict": r.verdict}
         elif s.kind == "hank":
-            role = next(
-                cat.get("ModelRole", r)
-                for r in cat.ids("ModelRole")
-                if cat.get("ModelRole", r).hank == s.name
-            )
-            if role.model is not None:
-                raise ScenarioError("a pinned model in a scenario: the scenario runs no model")
-            trail.steps.append("refused: no model pinned (D3)")
-            upd = {"judged": True, "verdict": None}
+            _refuse(cat, d, s.name, f"job:{job.job_id}", trail.steps)
+            upd = {
+                "judged": True,
+                "verdict": Verdict(**DOUBTFUL),
+            }  # a refused judge reads as doubtful
         elif s.kind == "ask" and s.name == "v3_approve":
             q = {
                 "job_id": job.job_id,
@@ -161,6 +159,17 @@ def _walk_job(cat: Catalog, d: Dossier, firm: Firm, pack: Pack, xml: bytes, trai
             raise ScenarioError(f"{trail.name}: unexpected step {s.kind}:{s.name} ({s.reason})")
         facts = facts.model_copy(update=upd)
     raise ScenarioError(f"{trail.name}: no end after 20 steps")
+
+
+def _refuse(cat: Catalog, d: Dossier, hank: str, issue: str, steps: list[str]) -> None:
+    """The hank step through the Dispatcher's own gate: no role is pinned until D3, so render
+    refuses and nothing runs. A scenario never runs a model."""
+    try:
+        render(cat, REPO, hank, d.folder / "runs" / issue.replace(":", "_"))
+    except HankRefused:
+        steps.append("refused: no model pinned (D3)")
+        return
+    raise ScenarioError(f"{hank} rendered: a scenario runs no model")
 
 
 def _pack(firm: Firm, period: str, gd: GenDoc, xml: bytes) -> Pack:
@@ -331,7 +340,7 @@ def run_month(
             diff = period_diff(cat, period, items, w, axes=firm.axes, balances=balances or None)
             facts = facts.model_copy(update={"diffed": True})
         elif s.kind == "hank":
-            close_steps.append("refused: no model pinned (D3)")
+            _refuse(cat, d, s.name, f"close:{firm.cui}:{period}", close_steps)
             facts = facts.model_copy(update={"suggested": True})
         elif s.kind == "ask" and s.name == "v2_close":
             q = {"material": diff.material, "blockers": diff.blockers}
