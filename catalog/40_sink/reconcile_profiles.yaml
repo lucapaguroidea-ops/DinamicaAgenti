@@ -13,12 +13,14 @@ rows:
     note: digits_core counts only with the same partner CUI. Generous on purpose.
   - id: pre_bon_date_gross
     status: draft
+    fiscal_classes: [bon]
     stage: pre
     match_keys: [date, gross]
     tolerance: "0.05"
     review: true
   - id: pre_extras_date_gross
     status: draft
+    fiscal_classes: [extras]
     stage: pre
     match_keys: [date, gross]
     tolerance: "0.05"
@@ -43,6 +45,7 @@ rows:
     note: TVA la încasare; VAT stays on 4428 until settlement.
   - id: post_bon_how
     status: draft
+    fiscal_classes: [bon]
     stage: post
     match_keys: [date, gross]
     tolerance: "0.05"

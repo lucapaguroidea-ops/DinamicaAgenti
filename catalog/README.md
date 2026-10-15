@@ -15,7 +15,7 @@ YAML row here (P2). The gate kit loads it; the procedures walk it. Rows are writ
 | `20_document/` | source documents (what a file is, when it may emit) and Job kinds |
 | `30_path/` | articole de cale (filters, require / forbid, approval policy, expected accounts, mouths), SAGA mouths, procedure definitions |
 | `40_sink/` | reconcile profiles (PRE / POST) and close kinds |
-| `50_control/` | question kinds (actor, answer schema, check) and model roles (system, pinned model, role card) |
+| `50_control/` | question kinds (actor, answer schema, check) and model roles (system, hank, codon, tier, pinned model, role card, output file and its shape) |
 | `60_practice/` | month controls, filings, statement grain, additive rows |
 
 ## File format

@@ -12,7 +12,26 @@ def test_cui_command(capsys):
 def test_planned_commands_refuse(capsys):
     for name in PLANNED:
         assert main([name]) == 2
-    assert "not built yet" in capsys.readouterr().err
+        assert "not built yet" in capsys.readouterr().err
+
+
+def test_every_command_the_documents_name_exists():
+    import re
+    from pathlib import Path
+
+    import pytest
+
+    root = Path(__file__).resolve().parents[1]
+    named = set()
+    for doc in [*root.glob("*.md"), *root.glob("*/README.md")]:
+        named |= set(
+            re.findall(r"`(?:uv run )?kit ([a-z][a-z-]*)", doc.read_text(encoding="utf-8"))
+        )
+    assert named, "the documents name kit commands"
+    for name in sorted(named):
+        with pytest.raises(SystemExit) as out:
+            main([name, "--help"])
+        assert out.value.code == 0, name
 
 
 def test_catalog_command(tmp_path, capsys):
@@ -21,3 +40,111 @@ def test_catalog_command(tmp_path, capsys):
     (tmp_path / "bad.yaml").write_text("catalog: Ledger\nfile_schema: 1\nrows: []\n")
     assert main(["catalog", str(tmp_path)]) == 1
     assert "unknown catalog 'Ledger'" in capsys.readouterr().err
+
+
+def test_emit_command(tmp_path, capsys):
+    import hashlib
+    import json
+
+    good = {
+        "client_cui": "41526372",
+        "period": "2026-09",
+        "source_hash": hashlib.sha256(b"doc").hexdigest(),
+        "source_doc_id": "ro_efactura_ubl",
+        "kinds": ["ubl_spv"],
+        "our_role": "inbound",
+        "counterparty_cui": "73645193",
+    }
+    (tmp_path / "pack.json").write_text(json.dumps(good))
+    assert main(["emit", str(tmp_path / "pack.json")]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["emit"] and out["job_kind"] == "ro_efactura"
+
+    (tmp_path / "bad.json").write_text(json.dumps({**good, "client_cui": "41526371"}))
+    assert main(["emit", str(tmp_path / "bad.json")]) == 1
+    assert "not a valid CUI" in capsys.readouterr().err
+
+
+def test_read_command(tmp_path, capsys):
+    import io
+    import json
+    import zipfile
+
+    from test_ubl import ubl
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("123.xml", ubl())
+        z.writestr("semnatura_123.xml", b'<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"/>')
+    (tmp_path / "spv.zip").write_bytes(buf.getvalue())
+    assert main(["read", str(tmp_path / "spv.zip"), "--client", "RO41526372"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["file"] == "123.xml" and out["client"]["our_role"] == "inbound"
+    assert out["document"]["totals"]["gross"] == "119.00"
+
+    (tmp_path / "bad.xml").write_bytes(ubl(payable="1.00"))
+    assert main(["read", str(tmp_path / "bad.xml")]) == 1
+    assert "BR-CO-16" in capsys.readouterr().err
+
+
+def test_emit_into_a_dossier(tmp_path, capsys):
+    import hashlib
+    import json
+
+    pack = {
+        "client_cui": "41526372",
+        "period": "2026-09",
+        "source_hash": hashlib.sha256(b"doc").hexdigest(),
+        "source_doc_id": "ro_efactura_ubl",
+        "kinds": ["ubl_spv"],
+        "our_role": "inbound",
+        "counterparty_cui": "73645193",
+    }
+    (tmp_path / "pack.json").write_text(json.dumps(pack))
+    args = ["emit", str(tmp_path / "pack.json"), "--dossiers", str(tmp_path / "dossiers")]
+    assert main(args) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert main(args) == 0
+    again = json.loads(capsys.readouterr().out)
+    assert first["created"] and not again["created"] and first["job_id"] == again["job_id"]
+    assert (tmp_path / "dossiers" / "41526372" / "store.db").is_file()
+
+
+def test_answer_command(tmp_path, capsys):
+    import json
+
+    (tmp_path / "q.json").write_text(json.dumps({"job_id": "j1"}))
+    (tmp_path / "ok.json").write_text(json.dumps({"decision": "approve"}))
+    (tmp_path / "bad.json").write_text(json.dumps({"decision": "maybe"}))
+    base = [
+        "answer",
+        "--dossiers",
+        str(tmp_path / "d"),
+        "--cui",
+        "41526372",
+        "--issue",
+        "job:j1",
+        "--kind",
+        "v3_approve",
+        "--question",
+        str(tmp_path / "q.json"),
+        "--operator",
+        "Ana",
+    ]
+    assert main([*base, "--answer", str(tmp_path / "bad.json")]) == 3
+    assert "decision" in json.loads(capsys.readouterr().out)["error"]
+    assert main([*base, "--answer", str(tmp_path / "ok.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "accepted"
+    assert main([*base, "--answer", str(tmp_path / "ok.json"), "--actor", "saga_agent"]) == 1
+    assert "for a person" in capsys.readouterr().err
+
+
+def test_route_command(tmp_path, capsys):
+    import json
+
+    (tmp_path / "f.json").write_text(json.dumps({"recon_open": True}))
+    assert main(["route", "--procedure", "close", "--facts", str(tmp_path / "f.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["name"] == "recon"
+    (tmp_path / "bad.json").write_text(json.dumps({"model_says": "file"}))
+    assert main(["route", "--procedure", "close", "--facts", str(tmp_path / "bad.json")]) == 1
+    assert "model_says" in capsys.readouterr().err

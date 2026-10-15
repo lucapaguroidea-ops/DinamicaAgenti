@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/hankweave@0.12.0/schemas/hank.schema.json",
+  "meta": {
+    "name": "split-container",
+    "version": "0.1.0",
+    "description": "Reader: propose the parts of an expense report; a person confirms them (decont_split)."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 0.3,
+      "maxTimeSeconds": 300,
+      "onExceeded": "fail"
+    }
+  },
+  "globalSystemPromptFile": "prompts/system.md",
+  "hank": [
+    {
+      "id": "propose",
+      "name": "Propose the parts",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/propose.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/parts.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.3,
+        "maxTimeSeconds": 300,
+        "onExceeded": "fail"
+      }
+    }
+  ]
+}

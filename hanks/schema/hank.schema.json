@@ -1,0 +1,2477 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unpkg.com/hankweave@latest/schemas/hank.schema.json",
+  "title": "Hankweave Hank File",
+  "description": "Schema for hank.json - the main workflow configuration file for Hankweave. See https://hankweave.dev/reference/configuration for documentation.",
+  "$ref": "#/definitions/HankweaveHankFile",
+  "definitions": {
+    "HankweaveHankFile": {
+      "type": "object",
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema URL for editor support"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Human-readable name for the hank"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Version number (e.g., '1.0.0')"
+            },
+            "description": {
+              "type": "string",
+              "description": "Optional description of what this hank does"
+            },
+            "author": {
+              "type": "string",
+              "description": "Optional author information"
+            }
+          },
+          "required": [
+            "name",
+            "version"
+          ],
+          "additionalProperties": false,
+          "description": "Metadata for sharing/indexing (optional)"
+        },
+        "overrides": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "description": "Override model for this hank (e.g., 'sonnet' for Claude, 'flash' for Gemini, 'This task needs high reasoning')"
+            },
+            "dataHashTimeLimit": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "Override time limit for data hashing in milliseconds"
+            },
+            "sentinel": {
+              "type": "object",
+              "properties": {
+                "enablePersistence": {
+                  "type": "boolean",
+                  "description": "Enable filesystem persistence for sentinel outputs"
+                },
+                "healthCheckGracePeriodMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "description": "Grace period for sentinel health checks (milliseconds)"
+                },
+                "waitForAllHealthChecks": {
+                  "type": "boolean",
+                  "description": "Wait for all health checks before loading sentinels"
+                }
+              },
+              "additionalProperties": false,
+              "description": "Override sentinel system settings"
+            },
+            "shimIdleTimeout": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1800,
+              "description": "Default shim idle timeout for all codons in this hank (seconds)"
+            },
+            "budget": {
+              "type": "object",
+              "properties": {
+                "maxDollars": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Total cost budget in USD."
+                },
+                "maxTimeSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Wall-clock time limit in seconds."
+                },
+                "allocation": {
+                  "type": "string",
+                  "enum": [
+                    "shared",
+                    "proportional",
+                    "proportional-strict"
+                  ],
+                  "default": "shared",
+                  "description": "How the dollar budget is distributed among children. 'shared': first-past-the-post (default). 'proportional': pre-allocate shares, unspent flows back. 'proportional-strict': pre-allocate shares, unspent evaporates."
+                },
+                "shares": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "description": "Map of child codon/loop ID to fraction (0-1) of the budget."
+                },
+                "onExceeded": {
+                  "type": "string",
+                  "enum": [
+                    "complete",
+                    "fail"
+                  ],
+                  "description": "What happens when budget is exceeded. 'complete' = graceful completion (default). 'fail' = codon failure, triggers onFailure policy."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "Architect's overrides (optional)"
+        },
+        "requirements": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Environment variables that must be set for this hank to run"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Host programs (bare names, resolved on PATH) that must be installed for this hank to run, e.g. [\"bun\", \"jq\"]. The runtime checks these before the run starts but never infers them from commands: hank authors — human or agent — are responsible for keeping this list current as rigSetup, beforeCopy, and other commands change."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Requirements that must be met for this hank to run (optional)"
+        },
+        "globalSystemPromptFile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ],
+          "description": "Global system prompt file(s) applied to all codons. Must be relative path(s) inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+        },
+        "globalSystemPromptText": {
+          "type": "string",
+          "description": "Global system prompt text applied to all codons"
+        },
+        "hank": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "codon",
+                    "default": "codon",
+                    "description": "Type discriminator - optional, defaults to 'codon'"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique identifier for this codon (e.g., 'codon-1', 'data-analysis')"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable name displayed in UI and logs"
+                  },
+                  "promptFile": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    ],
+                    "description": "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                  },
+                  "promptText": {
+                    "type": "string",
+                    "description": "Inline prompt text (mutually exclusive with promptFile)"
+                  },
+                  "appendSystemPromptFile": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    ],
+                    "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                  },
+                  "appendSystemPromptText": {
+                    "type": "string",
+                    "description": "Inline system prompt text to append (mutually exclusive with appendSystemPromptFile)"
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim."
+                  },
+                  "continuationMode": {
+                    "type": "string",
+                    "enum": [
+                      "fresh",
+                      "continue-previous"
+                    ],
+                    "description": "How this codon should handle continuation from previous codons. 'fresh': Start a new session (default for most cases). 'continue-previous': Continue from the previous codon's session, maintaining context and conversation history. The previous codon must have completed successfully."
+                  },
+                  "rigSetup": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "copy",
+                              "description": "Type of setup operation"
+                            },
+                            "copy": {
+                              "type": "object",
+                              "properties": {
+                                "from": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                                },
+                                "to": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: 'templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: 'templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: 'templates/config.json', to: 'src/config.json' → copies file; from: 'templates/config.json', to: 'src/settings.json' → copies file with rename"
+                                }
+                              },
+                              "required": [
+                                "from",
+                                "to"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "allowFailure": {
+                              "type": "boolean",
+                              "default": false,
+                              "description": "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., copying files that don't exist yet)."
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "copy"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "command",
+                              "description": "Type of setup operation"
+                            },
+                            "command": {
+                              "type": "object",
+                              "properties": {
+                                "run": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Shell command to execute"
+                                },
+                                "workingDirectory": {
+                                  "type": "string",
+                                  "enum": [
+                                    "project",
+                                    "lastCopied"
+                                  ],
+                                  "default": "project",
+                                  "description": "Working directory for command execution (default: 'project')"
+                                }
+                              },
+                              "required": [
+                                "run"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "allowFailure": {
+                              "type": "boolean",
+                              "default": false,
+                              "description": "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., running commands that might not succeed initially)."
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "command"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "description": "Rig setup operations to run before codon starts. Each operation must complete successfully for codon to start."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Optional description shown to users about what this codon does"
+                  },
+                  "checkpointedFiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Glob patterns (or file/directory names — a directory resolves to its contents) for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved with git's own gitignore handling (rules re-read live, so a .gitignore written mid-run takes effect)."
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Optional environment variables to set for the Claude process"
+                  },
+                  "outputFiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "copy": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "description": "Glob patterns to copy from execution directory to output directory"
+                        },
+                        "beforeCopy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "command",
+                                "description": "Type of setup operation"
+                              },
+                              "command": {
+                                "type": "object",
+                                "properties": {
+                                  "run": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Shell command to execute"
+                                  },
+                                  "workingDirectory": {
+                                    "type": "string",
+                                    "enum": [
+                                      "project"
+                                    ],
+                                    "default": "project",
+                                    "description": "Working directory for command execution (default: 'project')"
+                                  }
+                                },
+                                "required": [
+                                  "run"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "command"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Optional commands to run before copying (run in executionPath)"
+                        }
+                      },
+                      "required": [
+                        "copy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands."
+                  },
+                  "sentinels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sentinelConfig": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "^[a-z0-9-]+$"
+                                },
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "trigger": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "event"
+                                        },
+                                        "on": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          },
+                                          "minItems": 1
+                                        },
+                                        "conditions": {
+                                          "type": "array",
+                                          "items": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "operator": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "equals",
+                                                      "notEquals"
+                                                    ]
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "value": {
+                                                    "type": [
+                                                      "string",
+                                                      "number",
+                                                      "boolean",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "operator",
+                                                  "path",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "operator": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "in",
+                                                      "notIn"
+                                                    ]
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "value": {
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": [
+                                                        "string",
+                                                        "number"
+                                                      ]
+                                                    },
+                                                    "minItems": 1
+                                                  }
+                                                },
+                                                "required": [
+                                                  "operator",
+                                                  "path",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "operator": {
+                                                    "type": "string",
+                                                    "const": "contains"
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "value": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "operator",
+                                                  "path",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "operator": {
+                                                    "type": "string",
+                                                    "const": "matches"
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "value": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "operator",
+                                                  "path",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "operator": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "greaterThan",
+                                                      "lessThan"
+                                                    ]
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "value": {
+                                                    "type": "number"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "operator",
+                                                  "path",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "on"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "sequence"
+                                        },
+                                        "interestFilter": {
+                                          "type": "object",
+                                          "properties": {
+                                            "on": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              },
+                                              "minItems": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "on"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "pattern": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string"
+                                              },
+                                              "conditions": {
+                                                "type": "array",
+                                                "items": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "equals",
+                                                            "notEquals"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": [
+                                                            "string",
+                                                            "number",
+                                                            "boolean",
+                                                            "null"
+                                                          ]
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "in",
+                                                            "notIn"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "array",
+                                                          "items": {
+                                                            "type": [
+                                                              "string",
+                                                              "number"
+                                                            ]
+                                                          },
+                                                          "minItems": 1
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "const": "contains"
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "string"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "const": "matches"
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "string"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "greaterThan",
+                                                            "lessThan"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "number"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "type"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "minItems": 1
+                                        },
+                                        "options": {
+                                          "type": "object",
+                                          "properties": {
+                                            "consecutive": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "interestFilter",
+                                        "pattern"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "execution": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "strategy": {
+                                          "type": "string",
+                                          "const": "immediate"
+                                        }
+                                      },
+                                      "required": [
+                                        "strategy"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "strategy": {
+                                          "type": "string",
+                                          "const": "debounce"
+                                        },
+                                        "milliseconds": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 300000
+                                        }
+                                      },
+                                      "required": [
+                                        "strategy",
+                                        "milliseconds"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "strategy": {
+                                          "type": "string",
+                                          "const": "count"
+                                        },
+                                        "threshold": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1000
+                                        }
+                                      },
+                                      "required": [
+                                        "strategy",
+                                        "threshold"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "strategy": {
+                                          "type": "string",
+                                          "const": "timeWindow"
+                                        },
+                                        "milliseconds": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 3600000
+                                        }
+                                      },
+                                      "required": [
+                                        "strategy",
+                                        "milliseconds"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "systemPromptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    }
+                                  ],
+                                  "description": "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                },
+                                "systemPromptText": {
+                                  "type": "string"
+                                },
+                                "userPromptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    }
+                                  ],
+                                  "description": "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                },
+                                "userPromptText": {
+                                  "type": "string"
+                                },
+                                "conversational": {
+                                  "type": "object",
+                                  "properties": {
+                                    "trimmingStrategy": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "type": {
+                                              "type": "string",
+                                              "const": "maxTurns"
+                                            },
+                                            "maxTurns": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 100
+                                            }
+                                          },
+                                          "required": [
+                                            "type",
+                                            "maxTurns"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "type": {
+                                              "type": "string",
+                                              "const": "maxTokens"
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 100000
+                                            }
+                                          },
+                                          "required": [
+                                            "type",
+                                            "maxTokens"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "continueOnError": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "trimmingStrategy"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "errorHandling": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxConsecutiveFailures": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "description": "Maximum consecutive failures before unloading sentinel. Default: 3"
+                                    },
+                                    "unloadOnFatalError": {
+                                      "type": "boolean",
+                                      "description": "Whether to unload on fatal errors. Default: true"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "llmParams": {
+                                  "type": "object",
+                                  "properties": {
+                                    "temperature": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 2,
+                                      "description": "Temperature for response generation (0=deterministic, 2=creative)"
+                                    },
+                                    "maxOutputTokens": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 100000,
+                                      "description": "Maximum tokens in the response"
+                                    },
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 5,
+                                      "description": "Number of retry attempts for failed LLM calls"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "model": {
+                                  "type": "string",
+                                  "description": "The full model ID to use (e.g., \"anthropic/claude-3-5-sonnet-20241022\", \"openai/gpt-4-turbo\")."
+                                },
+                                "structuredOutput": {
+                                  "type": "object",
+                                  "properties": {
+                                    "output": {
+                                      "type": "string",
+                                      "enum": [
+                                        "object",
+                                        "array",
+                                        "enum"
+                                      ]
+                                    },
+                                    "schemaStr": {
+                                      "type": "string",
+                                      "description": "Inline Zod schema code"
+                                    },
+                                    "schemaFile": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                    },
+                                    "enumValues": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "minItems": 1
+                                    },
+                                    "schemaName": {
+                                      "type": "string"
+                                    },
+                                    "schemaDescription": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "output"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "joinString": {
+                                  "type": "string",
+                                  "description": "String to join entries in text-based log file. Only valid for text output. Supports escape sequences: \\n (newline), \\t (tab), \\r (carriage return), \\\\ (backslash). Defaults to '\\n---\\n' for visual separation."
+                                },
+                                "reportToWebsocket": {
+                                  "type": "object",
+                                  "properties": {
+                                    "lifecycle": {
+                                      "type": "boolean"
+                                    },
+                                    "errors": {
+                                      "type": "boolean"
+                                    },
+                                    "outputs": {
+                                      "type": "boolean"
+                                    },
+                                    "triggers": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "output": {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "text",
+                                        "jsonl"
+                                      ]
+                                    },
+                                    "file": {
+                                      "type": "string"
+                                    },
+                                    "lastValueFile": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "trigger",
+                                "execution",
+                                "model"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "settings": {
+                          "type": "object",
+                          "properties": {
+                            "failCodonIfNotLoaded": {
+                              "type": "boolean"
+                            },
+                            "outputPaths": {
+                              "type": "object",
+                              "properties": {
+                                "logFile": {
+                                  "type": "string"
+                                },
+                                "lastValueFile": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "reportToWebsocket": {
+                              "type": "object",
+                              "properties": {
+                                "lifecycle": {
+                                  "type": "boolean"
+                                },
+                                "errors": {
+                                  "type": "boolean"
+                                },
+                                "outputs": {
+                                  "type": "boolean"
+                                },
+                                "triggers": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "sentinelConfig"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons."
+                  },
+                  "archiveOnSuccess": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Paths to archive after successful completion. These files/directories are moved to rigArchive/ after the codon completes successfully. Paths are relative to the agent workspace (agentRoot/). Archived files can be restored during rollback."
+                  },
+                  "onFailure": {
+                    "type": "string",
+                    "enum": [
+                      "abort",
+                      "retry",
+                      "ignore"
+                    ],
+                    "description": "How to handle codon failure. 'abort' (default): Use existing failure behavior (server stays active for retriable errors, shuts down for non-retriable). 'retry': Automatically retry up to maxAttempts times if the error is retriable. 'ignore': Record the failure but continue to the next codon."
+                  },
+                  "retryConfig": {
+                    "type": "object",
+                    "properties": {
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 3,
+                        "description": "Maximum number of retry attempts (1-10, default: 3)"
+                      },
+                      "delayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 60000,
+                        "default": 1000,
+                        "description": "Base delay before the first retry, in milliseconds (0-60000, default: 1000). Subsequent retries back off exponentially (delayMs * 2^attempts), capped by maxDelayMs."
+                      },
+                      "maxDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 600000,
+                        "default": 60000,
+                        "description": "Upper bound on any single retry wait, in milliseconds (0-600000, default: 60000). Caps both the exponential backoff and a provider-supplied Retry-After."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Delays grow exponentially from delayMs and are capped at maxDelayMs; when the provider supplies a Retry-After hint, that value is used instead of the computed backoff. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                  },
+                  "exhaustWithPrompt": {
+                    "type": "string",
+                    "description": "Prompt to send when extending codon until context exhaustion. When set, the codon will automatically continue with this prompt after each successful completion until context is exhausted."
+                  },
+                  "maxExtensions": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "default": 100,
+                    "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
+                  },
+                  "autoCompact": {
+                    "type": "boolean",
+                    "description": "Whether the harness may auto-compact (summarize/trim) the session when the context window fills. Default: false — compaction is disabled, the provider's context-overflow error surfaces instead, plain codons fail at the window, and 'terminateOn: contextExceeded' loops terminate on the real boundary. Set true to absorb the boundary: the harness compacts, emits a compact_boundary event (which is the contextExceeded signal), and work continues on the compacted session."
+                  },
+                  "shimIdleTimeout": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1800,
+                    "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s for other providers via the embedded Pi SDK). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "maxDollars": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Max cost in USD. Execution stopped when exceeded."
+                      },
+                      "maxTimeSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Max wall-clock time in seconds."
+                      },
+                      "maxOutputTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "description": "Max output tokens."
+                      },
+                      "maxContextTokens": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "description": "Max context window tokens (high-water mark of input+output per turn). Useful for capping context growth independent of cost."
+                      },
+                      "onExceeded": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "fail"
+                        ],
+                        "description": "Override hank-level onExceeded for this codon."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "model",
+                  "continuationMode"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "loop",
+                    "description": "Type discriminator - required for loops"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique identifier for this loop"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable name displayed in UI and logs"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Optional description shown to users"
+                  },
+                  "terminateOn": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "iterationLimit"
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "limit"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "contextExceeded"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ],
+                    "description": "Termination condition for the loop"
+                  },
+                  "codons": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "codon",
+                          "default": "codon",
+                          "description": "Type discriminator - optional, defaults to 'codon'"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Unique identifier for this codon (e.g., 'codon-1', 'data-analysis')"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Human-readable name displayed in UI and logs"
+                        },
+                        "promptFile": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          ],
+                          "description": "Path to a file containing the prompt (mutually exclusive with promptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                        },
+                        "promptText": {
+                          "type": "string",
+                          "description": "Inline prompt text (mutually exclusive with promptFile)"
+                        },
+                        "appendSystemPromptFile": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          ],
+                          "description": "Path to a file containing system prompt to append (mutually exclusive with appendSystemPromptText). Must be a relative path inside the hank directory using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                        },
+                        "appendSystemPromptText": {
+                          "type": "string",
+                          "description": "Inline system prompt text to append (mutually exclusive with appendSystemPromptFile)"
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Model to use for this codon. Can be a Claude model ('sonnet', 'opus'), Gemini model ('gemini-2.0-flash-exp', 'flash'), or any other model supported by the configured shim."
+                        },
+                        "continuationMode": {
+                          "type": "string",
+                          "enum": [
+                            "fresh",
+                            "continue-previous"
+                          ],
+                          "description": "How this codon should handle continuation from previous codons. 'fresh': Start a new session (default for most cases). 'continue-previous': Continue from the previous codon's session, maintaining context and conversation history. The previous codon must have completed successfully."
+                        },
+                        "rigSetup": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "copy",
+                                    "description": "Type of setup operation"
+                                  },
+                                  "copy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "from": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Source path, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                                      },
+                                      "to": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Target path relative to projectPath (parent directory must exist). Always specifies the full target path including name. Examples: from: 'templates/foo', to: 'src/foo' → copies directory foo to src/foo; from: 'templates/foo', to: 'src/bar' → copies directory foo as src/bar; from: 'templates/config.json', to: 'src/config.json' → copies file; from: 'templates/config.json', to: 'src/settings.json' → copies file with rename"
+                                      }
+                                    },
+                                    "required": [
+                                      "from",
+                                      "to"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "allowFailure": {
+                                    "type": "boolean",
+                                    "default": false,
+                                    "description": "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., copying files that don't exist yet)."
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "copy"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "command",
+                                    "description": "Type of setup operation"
+                                  },
+                                  "command": {
+                                    "type": "object",
+                                    "properties": {
+                                      "run": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Shell command to execute"
+                                      },
+                                      "workingDirectory": {
+                                        "type": "string",
+                                        "enum": [
+                                          "project",
+                                          "lastCopied"
+                                        ],
+                                        "default": "project",
+                                        "description": "Working directory for command execution (default: 'project')"
+                                      }
+                                    },
+                                    "required": [
+                                      "run"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "allowFailure": {
+                                    "type": "boolean",
+                                    "default": false,
+                                    "description": "If true, failure of this operation won't fail the codon (default: false). Recommended for rig setup in loop codons where operations might fail in some iterations (e.g., running commands that might not succeed initially)."
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "command"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "description": "Rig setup operations to run before codon starts. Each operation must complete successfully for codon to start."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Optional description shown to users about what this codon does"
+                        },
+                        "checkpointedFiles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Glob patterns (or file/directory names — a directory resolves to its contents) for files to checkpoint during codon execution. These files will be: watched for changes and streamed to the client, tracked in the git-based checkpoint system, and resolved with git's own gitignore handling (rules re-read live, so a .gitignore written mid-run takes effect)."
+                        },
+                        "env": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "Optional environment variables to set for the Claude process"
+                        },
+                        "outputFiles": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "copy": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1,
+                                "description": "Glob patterns to copy from execution directory to output directory"
+                              },
+                              "beforeCopy": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "command",
+                                      "description": "Type of setup operation"
+                                    },
+                                    "command": {
+                                      "type": "object",
+                                      "properties": {
+                                        "run": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Shell command to execute"
+                                        },
+                                        "workingDirectory": {
+                                          "type": "string",
+                                          "enum": [
+                                            "project"
+                                          ],
+                                          "default": "project",
+                                          "description": "Working directory for command execution (default: 'project')"
+                                        }
+                                      },
+                                      "required": [
+                                        "run"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "command"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "description": "Optional commands to run before copying (run in executionPath)"
+                              }
+                            },
+                            "required": [
+                              "copy"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Optional output copy steps to run after codon completion: files to copy out from a completed codon, with optional pre-copy commands."
+                        },
+                        "sentinels": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sentinelConfig": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Path to a sentinel config file, relative to the hank directory and inside it, using '/' separators; absolute paths, '..' escapes, and symlinks are rejected."
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "pattern": "^[a-z0-9-]+$"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "description": {
+                                        "type": "string"
+                                      },
+                                      "trigger": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "const": "event"
+                                              },
+                                              "on": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                },
+                                                "minItems": 1
+                                              },
+                                              "conditions": {
+                                                "type": "array",
+                                                "items": {
+                                                  "anyOf": [
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "equals",
+                                                            "notEquals"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": [
+                                                            "string",
+                                                            "number",
+                                                            "boolean",
+                                                            "null"
+                                                          ]
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "in",
+                                                            "notIn"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "array",
+                                                          "items": {
+                                                            "type": [
+                                                              "string",
+                                                              "number"
+                                                            ]
+                                                          },
+                                                          "minItems": 1
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "const": "contains"
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "string"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "const": "matches"
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "string"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    },
+                                                    {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "operator": {
+                                                          "type": "string",
+                                                          "enum": [
+                                                            "greaterThan",
+                                                            "lessThan"
+                                                          ]
+                                                        },
+                                                        "path": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "number"
+                                                        }
+                                                      },
+                                                      "required": [
+                                                        "operator",
+                                                        "path",
+                                                        "value"
+                                                      ],
+                                                      "additionalProperties": false
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "on"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "const": "sequence"
+                                              },
+                                              "interestFilter": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "on": {
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    },
+                                                    "minItems": 1
+                                                  }
+                                                },
+                                                "required": [
+                                                  "on"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              "pattern": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "type": {
+                                                      "type": "string"
+                                                    },
+                                                    "conditions": {
+                                                      "type": "array",
+                                                      "items": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "operator": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "equals",
+                                                                  "notEquals"
+                                                                ]
+                                                              },
+                                                              "path": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "value": {
+                                                                "type": [
+                                                                  "string",
+                                                                  "number",
+                                                                  "boolean",
+                                                                  "null"
+                                                                ]
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "operator",
+                                                              "path",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "operator": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "in",
+                                                                  "notIn"
+                                                                ]
+                                                              },
+                                                              "path": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "value": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                  "type": [
+                                                                    "string",
+                                                                    "number"
+                                                                  ]
+                                                                },
+                                                                "minItems": 1
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "operator",
+                                                              "path",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "operator": {
+                                                                "type": "string",
+                                                                "const": "contains"
+                                                              },
+                                                              "path": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "value": {
+                                                                "type": "string"
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "operator",
+                                                              "path",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "operator": {
+                                                                "type": "string",
+                                                                "const": "matches"
+                                                              },
+                                                              "path": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "value": {
+                                                                "type": "string"
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "operator",
+                                                              "path",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "operator": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "greaterThan",
+                                                                  "lessThan"
+                                                                ]
+                                                              },
+                                                              "path": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "value": {
+                                                                "type": "number"
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "operator",
+                                                              "path",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "type"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                "minItems": 1
+                                              },
+                                              "options": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "consecutive": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "interestFilter",
+                                              "pattern"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      },
+                                      "execution": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "strategy": {
+                                                "type": "string",
+                                                "const": "immediate"
+                                              }
+                                            },
+                                            "required": [
+                                              "strategy"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "strategy": {
+                                                "type": "string",
+                                                "const": "debounce"
+                                              },
+                                              "milliseconds": {
+                                                "type": "integer",
+                                                "exclusiveMinimum": 0,
+                                                "maximum": 300000
+                                              }
+                                            },
+                                            "required": [
+                                              "strategy",
+                                              "milliseconds"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "strategy": {
+                                                "type": "string",
+                                                "const": "count"
+                                              },
+                                              "threshold": {
+                                                "type": "integer",
+                                                "exclusiveMinimum": 0,
+                                                "maximum": 1000
+                                              }
+                                            },
+                                            "required": [
+                                              "strategy",
+                                              "threshold"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "strategy": {
+                                                "type": "string",
+                                                "const": "timeWindow"
+                                              },
+                                              "milliseconds": {
+                                                "type": "integer",
+                                                "exclusiveMinimum": 0,
+                                                "maximum": 3600000
+                                              }
+                                            },
+                                            "required": [
+                                              "strategy",
+                                              "milliseconds"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      },
+                                      "systemPromptFile": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          }
+                                        ],
+                                        "description": "System prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                      },
+                                      "systemPromptText": {
+                                        "type": "string"
+                                      },
+                                      "userPromptFile": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          }
+                                        ],
+                                        "description": "User prompt file(s), relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                      },
+                                      "userPromptText": {
+                                        "type": "string"
+                                      },
+                                      "conversational": {
+                                        "type": "object",
+                                        "properties": {
+                                          "trimmingStrategy": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "const": "maxTurns"
+                                                  },
+                                                  "maxTurns": {
+                                                    "type": "integer",
+                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 100
+                                                  }
+                                                },
+                                                "required": [
+                                                  "type",
+                                                  "maxTurns"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "const": "maxTokens"
+                                                  },
+                                                  "maxTokens": {
+                                                    "type": "integer",
+                                                    "exclusiveMinimum": 0,
+                                                    "maximum": 100000
+                                                  }
+                                                },
+                                                "required": [
+                                                  "type",
+                                                  "maxTokens"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          },
+                                          "continueOnError": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "trimmingStrategy"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "errorHandling": {
+                                        "type": "object",
+                                        "properties": {
+                                          "maxConsecutiveFailures": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "description": "Maximum consecutive failures before unloading sentinel. Default: 3"
+                                          },
+                                          "unloadOnFatalError": {
+                                            "type": "boolean",
+                                            "description": "Whether to unload on fatal errors. Default: true"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "llmParams": {
+                                        "type": "object",
+                                        "properties": {
+                                          "temperature": {
+                                            "type": "number",
+                                            "minimum": 0,
+                                            "maximum": 2,
+                                            "description": "Temperature for response generation (0=deterministic, 2=creative)"
+                                          },
+                                          "maxOutputTokens": {
+                                            "type": "integer",
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 100000,
+                                            "description": "Maximum tokens in the response"
+                                          },
+                                          "maxRetries": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 5,
+                                            "description": "Number of retry attempts for failed LLM calls"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "model": {
+                                        "type": "string",
+                                        "description": "The full model ID to use (e.g., \"anthropic/claude-3-5-sonnet-20241022\", \"openai/gpt-4-turbo\")."
+                                      },
+                                      "structuredOutput": {
+                                        "type": "object",
+                                        "properties": {
+                                          "output": {
+                                            "type": "string",
+                                            "enum": [
+                                              "object",
+                                              "array",
+                                              "enum"
+                                            ]
+                                          },
+                                          "schemaStr": {
+                                            "type": "string",
+                                            "description": "Inline Zod schema code"
+                                          },
+                                          "schemaFile": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "description": "Path to a Zod schema file, relative to this config file's directory (or the hank directory for inline configs), using '/' separators. Must stay inside the hank directory; absolute paths and symlinks are rejected."
+                                          },
+                                          "enumValues": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "minItems": 1
+                                          },
+                                          "schemaName": {
+                                            "type": "string"
+                                          },
+                                          "schemaDescription": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "output"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "joinString": {
+                                        "type": "string",
+                                        "description": "String to join entries in text-based log file. Only valid for text output. Supports escape sequences: \\n (newline), \\t (tab), \\r (carriage return), \\\\ (backslash). Defaults to '\\n---\\n' for visual separation."
+                                      },
+                                      "reportToWebsocket": {
+                                        "type": "object",
+                                        "properties": {
+                                          "lifecycle": {
+                                            "type": "boolean"
+                                          },
+                                          "errors": {
+                                            "type": "boolean"
+                                          },
+                                          "outputs": {
+                                            "type": "boolean"
+                                          },
+                                          "triggers": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "output": {
+                                        "type": "object",
+                                        "properties": {
+                                          "format": {
+                                            "type": "string",
+                                            "enum": [
+                                              "text",
+                                              "jsonl"
+                                            ]
+                                          },
+                                          "file": {
+                                            "type": "string"
+                                          },
+                                          "lastValueFile": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "name",
+                                      "trigger",
+                                      "execution",
+                                      "model"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "settings": {
+                                "type": "object",
+                                "properties": {
+                                  "failCodonIfNotLoaded": {
+                                    "type": "boolean"
+                                  },
+                                  "outputPaths": {
+                                    "type": "object",
+                                    "properties": {
+                                      "logFile": {
+                                        "type": "string"
+                                      },
+                                      "lastValueFile": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "reportToWebsocket": {
+                                    "type": "object",
+                                    "properties": {
+                                      "lifecycle": {
+                                        "type": "boolean"
+                                      },
+                                      "errors": {
+                                        "type": "boolean"
+                                      },
+                                      "outputs": {
+                                        "type": "boolean"
+                                      },
+                                      "triggers": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "sentinelConfig"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "Sentinels to run during this codon. Sentinels are parallel observation agents that process the event stream. Each entry is a wrapper object with sentinelConfig (portable sentinel configuration, file or inline) and settings (codon-specific settings like output paths and load requirements). This wrapper pattern keeps sentinel configs reusable across codons."
+                        },
+                        "archiveOnSuccess": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Paths to archive after successful completion. These files/directories are moved to rigArchive/ after the codon completes successfully. Paths are relative to the agent workspace (agentRoot/). Archived files can be restored during rollback."
+                        },
+                        "onFailure": {
+                          "type": "string",
+                          "enum": [
+                            "abort",
+                            "retry",
+                            "ignore"
+                          ],
+                          "description": "How to handle codon failure. 'abort' (default): Use existing failure behavior (server stays active for retriable errors, shuts down for non-retriable). 'retry': Automatically retry up to maxAttempts times if the error is retriable. 'ignore': Record the failure but continue to the next codon."
+                        },
+                        "retryConfig": {
+                          "type": "object",
+                          "properties": {
+                            "maxAttempts": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 10,
+                              "default": 3,
+                              "description": "Maximum number of retry attempts (1-10, default: 3)"
+                            },
+                            "delayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 60000,
+                              "default": 1000,
+                              "description": "Base delay before the first retry, in milliseconds (0-60000, default: 1000). Subsequent retries back off exponentially (delayMs * 2^attempts), capped by maxDelayMs."
+                            },
+                            "maxDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 600000,
+                              "default": 60000,
+                              "description": "Upper bound on any single retry wait, in milliseconds (0-600000, default: 60000). Caps both the exponential backoff and a provider-supplied Retry-After."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Configuration for retry behavior. Only used when onFailure is 'retry'. Delays grow exponentially from delayMs and are capped at maxDelayMs; when the provider supplies a Retry-After hint, that value is used instead of the computed backoff. Note: Retry counters are in-memory only - if the server restarts mid-retry, the counter is lost and the codon remains failed. Users can manually retry via checkpoint restore."
+                        },
+                        "exhaustWithPrompt": {
+                          "type": "string",
+                          "description": "Prompt to send when extending codon until context exhaustion. When set, the codon will automatically continue with this prompt after each successful completion until context is exhausted."
+                        },
+                        "maxExtensions": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "default": 100,
+                          "description": "Maximum number of extensions before forcing completion. Default: 100. Safety valve to prevent infinite extension loops."
+                        },
+                        "autoCompact": {
+                          "type": "boolean",
+                          "description": "Whether the harness may auto-compact (summarize/trim) the session when the context window fills. Default: false — compaction is disabled, the provider's context-overflow error surfaces instead, plain codons fail at the window, and 'terminateOn: contextExceeded' loops terminate on the real boundary. Set true to absorb the boundary: the harness compacts, emits a compact_boundary event (which is the contextExceeded signal), and work continues on the compacted session."
+                        },
+                        "shimIdleTimeout": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1800,
+                          "description": "Max seconds between agent events before the session aborts (idle timeout). Overrides hank-level and runtime defaults. If unset, falls back to hank override, runtime config, or the built-in default (180s for Anthropic models via the Claude SDK, 120s for other providers via the embedded Pi SDK). An idle-timeout abort is a retriable failure, so onFailure: 'retry' applies."
+                        },
+                        "budget": {
+                          "type": "object",
+                          "properties": {
+                            "maxDollars": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Max cost in USD. Execution stopped when exceeded."
+                            },
+                            "maxTimeSeconds": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Max wall-clock time in seconds."
+                            },
+                            "maxOutputTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "description": "Max output tokens."
+                            },
+                            "maxContextTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "description": "Max context window tokens (high-water mark of input+output per turn). Useful for capping context growth independent of cost."
+                            },
+                            "onExceeded": {
+                              "type": "string",
+                              "enum": [
+                                "complete",
+                                "fail"
+                              ],
+                              "description": "Override hank-level onExceeded for this codon."
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "model",
+                        "continuationMode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "description": "Array of codons to execute in each iteration"
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "maxDollars": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Total cost budget in USD."
+                      },
+                      "maxTimeSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Wall-clock time limit in seconds."
+                      },
+                      "allocation": {
+                        "type": "string",
+                        "enum": [
+                          "shared",
+                          "proportional",
+                          "proportional-strict"
+                        ],
+                        "default": "shared",
+                        "description": "How the dollar budget is distributed among children. 'shared': first-past-the-post (default). 'proportional': pre-allocate shares, unspent flows back. 'proportional-strict': pre-allocate shares, unspent evaporates."
+                      },
+                      "shares": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1
+                        },
+                        "description": "Map of child codon/loop ID to fraction (0-1) of the budget."
+                      },
+                      "onExceeded": {
+                        "type": "string",
+                        "enum": [
+                          "complete",
+                          "fail"
+                        ],
+                        "description": "What happens when budget is exceeded. 'complete' = graceful completion (default). 'fail' = codon failure, triggers onFailure policy."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Budget scope for this loop."
+                  },
+                  "archiveOnSuccess": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Paths to archive when the loop terminates. Paths are relative to the agent workspace."
+                  }
+                },
+                "required": [
+                  "type",
+                  "id",
+                  "name",
+                  "terminateOn",
+                  "codons"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "minItems": 1,
+          "description": "The immutable logic sequence (required)"
+        }
+      },
+      "required": [
+        "hank"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

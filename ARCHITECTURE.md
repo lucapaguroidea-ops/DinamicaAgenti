@@ -35,7 +35,8 @@ The **Dispatcher** runs `kit route <issue>` after every event and acts on its an
 Runtime (Apache-2.0, TypeScript). A hank (`hank.json`) is a declared sequence of codons, each one
 sealed agent run with a pinned `model`, a prompt file, `continuationMode: "fresh"`,
 `checkpointedFiles` and a `budget`; rigs prepare the workspace; loops repeat codons up to a
-`terminateOn` limit; input is mounted read-only; every codon boundary is a git checkpoint; every
+`terminateOn` limit (an iteration count or context exhausted, never a computed condition); input
+is mounted read-only; every codon boundary is a git checkpoint; every
 tool call goes to the event journal. Facts: `RESEARCH_LOG.md` R1.
 
 A hank runs only where a model works, is short, ends by writing a JSON file, and decides nothing.
@@ -225,8 +226,15 @@ apply.
 
 ## 5. Questions to a person
 
-Each kind is a catalog row: actor, closed answer schema, check. In Paperclip: a child issue
-assigned to the actor, labelled `q:<kind>`, the answer as a JSON document.
+Each kind is a catalog row: actor, closed answer schema, check. In Paperclip (D2, owner,
+2026-10-14): a card on the work issue itself (an issue-thread interaction, `kit/cards.py`): each
+answer field is one question of an `ask_user_questions` card (a choice for an enum, a bool or
+offered values; a text field with its pattern for an atom; JSON text for a list or an object);
+`decont_split` with a Reader proposal is a checkbox card over the proposed parts, none
+preselected. A person's card is `human_only`; the SAGA agent's is addressed to that agent. The
+idempotency key is (issue, kind, question hash, attempt). The Dispatcher reads the result back
+into the kind's answer and runs it through `kit answer`; refused, it is asked again on a new
+card that shows the error. The work issue waits `in_review` while its card is pending.
 
 | Kind | Procedure | Answer | Effect |
 |---|---|---|---|
@@ -266,10 +274,18 @@ codon's prompt file; the card's hash is recorded with every call and is part of 
 | `split-container` | Reader | propose parts → `parts.json`; a person confirms (`decont_split`) |
 | `judge-document` | One + Two | judge → `verdict.json`; explain the approval question → `explain.json` |
 | `review-match` | One | confirm / contest / abstain on PRE → `review.json` |
-| `close-suggest` | One + Two | suggest → `suggest.json`; explain; draft a rule if unexplained documents remain |
+| `close-suggest` | One + Two | suggest → `suggest.json`; explain → `explain.json`; draft rules for unexplained documents → `rule.json` |
 
 Each hank mounts its inputs read-only, writes only to its execution directory, has a `budget`
 per codon, and is run with `--max-cost` and `--max-time`. A hank never touches the dossier store.
+
+Built in `kit/hanks.py` (WP-14). The hank folders hold the placeholder model `unpinned`;
+`kit hank render` writes a run with each codon's model from its role row and refuses the hank
+while a role is unpinned. `kit verify` checks a codon's file against the role's `answer` shape
+and its own check (a statement ties and is the client's; a part is a file of the container; a
+cited fact is in the input; a review keeps its Job; a rule matches an unexplained document). A
+refused judge reads as `{accounts_ok: false, risk: unknown, needs_human: true}`; a suggestion on
+a material month keeps no `file`.
 
 ## 7. The dossier store
 
@@ -279,6 +295,11 @@ Engine: **SQLite, one `store.db` per client** (owner, 2026-10-07, D1). The clien
 folder `dossiers/{cui}/`: records and files live behind the same boundary, a backup or restore
 touches one client only, and the only way in is a function that checks the CUI and opens that
 client's file. Every record still carries the CUI and is refused on a mismatch (P13).
+
+Built in `kit/store.py` (WP-08): `open_dossier(root, cui)` is the only way in; the file records
+its owner and refuses to open under another CUI; a trigger on every table refuses a row of another
+client; the job and answer logs are append-only (triggers); a Job's status moves forward only. The
+database keeps its rollback journal (no WAL), so a client's store is one file to copy.
 
 ```
 dossiers/{cui}/
@@ -301,6 +322,11 @@ dossiers/{cui}/
 | Control run | (CUI, period, control, snapshot) | stored once |
 | Filing item | (CUI, period, filing) | closed by a receipt only |
 | Backup label | `{cui}:{folder}:{utc}` | a restore of another client is refused |
+| Source | source hash (`sources/{period}/`) | the same document again is a no-op |
+| Books export | export id (`eye/{id}.json`) | stored once; the latest covering a month is its books |
+| CO.DiT | (CUI, period) | set once, never overwritten |
+| Issue facts | (issue, step key) | one write per step: a replayed wake adds nothing |
+| Paperclip link | our issue key | one Paperclip issue per issue |
 
 ## 8. The firm in Paperclip
 
@@ -314,9 +340,35 @@ dossiers/{cui}/
 | Builder, Reviewer | coding agents | build this repository on test data; fresh-context review of the diff |
 
 - **Projects:** one per client; one Build project.
-- **Issue kinds** (label + title prefix): `batch`, `job`, `recon`, `close`, `q:<kind>`. A `job`
-  is a child of its month's `close`; `close` is blocked by `recon` while it has open questions.
+- **Issue kinds** (label + title `{key} [{cui}]`): `batch`, `job`, `recon`, `close`; a question
+  is a card on its issue (§5), not an issue. A `job` is a child of its month's `close`; `close`
+  waits while `recon` has open questions.
 - **Routines:** recheck the Reconcile window when a books export arrives; retry parked reads; the
   import agent's pull; the month's close on the cabinet's date.
-- **Budgets:** per model role and per client, with hard stops: a stopped role refuses and a
-  person is asked.
+- **Budgets:** per model role (agent scope) and per client (project scope), with hard stops: a
+  stopped role refuses and a person is asked.
+
+Built in WP-15. `paperclip/company.yaml` is the company; `kit paperclip setup` prints its
+requests and `--apply` sends them (ids kept in a state file; a request is marked in flight
+before it is sent, and a run that stopped during one refuses to resend it until a person has
+looked; a webhook's signing secret, shown once, goes to a `0600` file, never to the state).
+`kit dispatch` is the Dispatcher's process adapter: one wake reads the issue's facts from the
+dossier (`issue_facts`, append-only, one write per key), takes in an answered card, routes, and
+does the step (`kit/dispatch.py`). A held issue is assigned to the accountant with its reason.
+Every kit step is an executor that reads its inputs from the dossier (`kit/steps.py`, WP-18):
+the documents as received (`kit intake` stores and gates a file and writes its batch issue), the
+books exports (`kit dossier add-export`: the kit's reading of SAGA's reports; reading SAGA's own
+export files waits on R4), the CO.DiT per period (`kit dossier set-codit`) and whether the client
+is a test firm (only a test firm binds `draft` rows, P14). The package step refuses with its
+reason (WP-10). A step that cannot run is held for the accountant with the reason. Facts that
+follow from another issue (the close waits while the month's Reconcile is open) are derived on
+every wake, never stored. A question's check reads what it needs from the dossier when it is
+asked, and again when it is answered where the books may have changed (`wait_validare`,
+`need_rj_export`).
+
+A pinned hank goes to its role agent (the Reader's, or the Classifier's for System One and Two)
+as a child issue `hank:{name}:{issue}` that blocks the work issue. The agent's `kit hank-run`
+prepares the input from the facts, reuses verified answers for the same input and card, else
+renders the hank and runs the runtime's one command line, verifies every output, and writes the
+facts back (what failed reads the cautious way); the hank issue closes and the work issue goes
+back to the Dispatcher.

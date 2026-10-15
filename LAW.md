@@ -6,7 +6,10 @@ A change to any principle is the owner's dated decision.
 **How to read it.** Every principle has a permanent id (`P1` …), never reused; a removed
 principle's id is retired. `[test]` marks a principle the build must enforce: a failing test
 fails the build, and the citation test (BUILD WP-03) checks that every `[test]` principle has a
-test naming it. `[owner, date]` marks a principle that came from a dated owner decision.
+test naming it. Until the code a `[test]` principle constrains exists, the principle may wait on
+the citation test's waiting list (`PENDING`), each entry naming the open work package that must
+bring its test; it leaves the list in the same commit as that test [owner, 2026-10-07].
+`[owner, date]` marks a principle that came from a dated owner decision.
 
 ## 1. The unit
 

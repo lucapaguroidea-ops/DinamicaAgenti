@@ -63,6 +63,7 @@ rows:
     posting_eligible: false
     primary_kinds: [xls, xlsx, pdf, msg, eml]
     needs_client_on_doc: true
+    our_role_default: inbound
     split:
       question: decont_split
       children: [decont_part_evidence, ro_efactura_ubl, ro_efactura_pdf, workings]

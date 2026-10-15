@@ -375,6 +375,9 @@ def test_status_is_required_and_active_needs_the_owners_approval(tmp_path):
             system: one
             hank: judge-document
             codon: judge
+            card: hanks/judge-document/prompts/judge.md
+            output: verdict.json
+            answer: {accounts_ok: bool}
     """,
             ),
         )
@@ -394,6 +397,9 @@ def test_status_is_required_and_active_needs_the_owners_approval(tmp_path):
             system: one
             hank: judge-document
             codon: judge
+            card: hanks/judge-document/prompts/judge.md
+            output: verdict.json
+            answer: {accounts_ok: bool}
     """,
             ),
         )
@@ -411,6 +417,9 @@ def test_status_is_required_and_active_needs_the_owners_approval(tmp_path):
             system: one
             hank: judge-document
             codon: judge
+            card: hanks/judge-document/prompts/judge.md
+            output: verdict.json
+            answer: {accounts_ok: bool}
     """,
     )
     assert load_catalog(write(tmp_path / "c", approved)).get("ModelRole", "judge").model is None

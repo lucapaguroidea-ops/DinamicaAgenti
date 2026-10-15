@@ -1,0 +1,87 @@
+{
+  "$schema": "https://unpkg.com/hankweave@0.12.0/schemas/hank.schema.json",
+  "meta": {
+    "name": "close-suggest",
+    "version": "0.1.0",
+    "description": "System One suggests the close action; System Two explains it and drafts rules for unexplained documents."
+  },
+  "overrides": {
+    "budget": {
+      "maxDollars": 0.4,
+      "maxTimeSeconds": 660,
+      "onExceeded": "fail"
+    }
+  },
+  "globalSystemPromptFile": "prompts/system.md",
+  "hank": [
+    {
+      "id": "suggest",
+      "name": "Suggest the close action",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/suggest.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/suggest.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.2,
+        "maxTimeSeconds": 300,
+        "onExceeded": "fail"
+      }
+    },
+    {
+      "id": "explain",
+      "name": "Explain the question",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/explain.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/explain.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.1,
+        "maxTimeSeconds": 180,
+        "onExceeded": "fail"
+      }
+    },
+    {
+      "id": "draft_rule",
+      "name": "Draft explained rules",
+      "model": "unpinned",
+      "continuationMode": "fresh",
+      "promptFile": "prompts/draft_rule.md",
+      "checkpointedFiles": [
+        "out/**/*"
+      ],
+      "outputFiles": [
+        {
+          "copy": [
+            "out/rule.json"
+          ]
+        }
+      ],
+      "onFailure": "abort",
+      "budget": {
+        "maxDollars": 0.1,
+        "maxTimeSeconds": 180,
+        "onExceeded": "fail"
+      }
+    }
+  ]
+}
