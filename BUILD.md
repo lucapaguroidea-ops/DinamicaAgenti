@@ -26,6 +26,8 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | WP-16 | done | WP-13 | Invented firms (five client types) and end-to-end scenarios |
 | WP-17 | todo | WP-10, WP-16 | Loop 0 in a SAGA C test firm |
 | WP-19 | todo | R4 | SAGA export reader: registru jurnal, balanță, purchase / sales journals → a books export (`kit dossier add-export` reads SAGA's files, not the kit's JSON) |
+| WP-20 | in-progress | D9 | Pin the shared core (PoartaContabila `poarta_contabila.core`, `pyproject.toml` at commit `413c71c`, `CORE_VERSION` 0.3.0) and replace the kit's re-implementations one module per WP, each with a parity test, then delete it: `ubl.py`, `catalog.py`, `recon.py`, `period.py`, `sorting.py`, `synthetic.py`, `questions.py` (module review, owner 2026-10-14, Q-9, Q-13). Step 1 done: the pin and `tests/test_core_parity.py` (both readers agree on every field they share over 390 synthetic invoices; one declared gap waits on D9) |
+| WP-21 | todo | WP-20, PoartaContabila WP-87 | The calendar in the firm: a Paperclip routine opens each client's month items with their due dates from the pinned core; the Dispatcher holds a client whose calendar refuses (P10) |
 | WP-18 | done | WP-15 | Sources and books exports in the dossier; every kit step an executor of the Dispatcher; `kit hank-run` (render, input, run, `kit verify`) |
 
 ## Decisions (owner)
@@ -36,6 +38,9 @@ owner decides before any code). Test data is invented; invented CUIs pass the ch
 | D4 | Where Paperclip, the dossiers and the hank execution directories run, and who may read them | the Paperclip deployment (`authenticated`, not `local_trusted`, for more than one person); `KIT_HOME`, `DOSSIERS`, `ACCOUNTANT_USER_ID`, `SAGA_AGENT_URL`; where a webhook secret is kept; the budgets and the close date marked `owner` in `paperclip/company.yaml` |
 | D5 | Non-payer reverse-charge accounts: 4423 or 446x | until decided: no expected accounts, always a person |
 | D6 | Receipts through an accounting note (DBF mouth) | decided after the receipts loop |
+| D7 | Which routes may carry client data to a model, and where hanks run (the module review's F17; Q-12) | a principle in `LAW.md`, the owner's dated change |
+| D8 | Payroll as evidence only, in `LAW.md`, as PoartaContabila's L17 (Q-19) | a principle in `LAW.md`, the owner's dated change |
+| D9 | The shared core's UBL reader: an invoice without a VAT breakdown (`cac:TaxSubtotal`) is accepted by the kit and refused by the core (`tests/test_core_parity.py`). Which rule does the core keep, and does `for_client` / `is_storno` / `customization_id` move into it? | the core's (stricter) rule, with the kit's extras added to the core; or the kit's rule in the core; until decided `kit/ubl.py` stays |
 
 ## The proof programme
 
