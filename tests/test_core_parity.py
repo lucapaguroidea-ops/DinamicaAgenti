@@ -2,6 +2,10 @@
 commit in ``pyproject.toml``) read the same e-invoices the same way, before any kit module is
 replaced by the core's (the module review's direction, owner 2026-10-14, Q-9 and Q-13).
 
+The pin is a commit, not the core's tag (``core.CORE_TAG``): tags cannot be pushed from the
+build sessions, so cutting a tag such as ``core-v0.4.0`` on that commit is the owner's; the pin
+moves to the tag once it exists.
+
 Parity is checked on every synthetic invoice of the core's five invented firms over a quarter:
 both readers accept each one and agree on every field they share. Where they differ, the gap is
 declared below and asserted exactly, so a change on either side fails here until the owner has
@@ -49,7 +53,7 @@ def test_the_core_is_pinned_and_imports_no_runtime_stack() -> None:
     import subprocess
     import sys
 
-    assert core.CORE_VERSION == "0.3.0"
+    assert core.CORE_VERSION == "0.4.0"
     code = (
         "import sys, poarta_contabila.core\n"
         "print(sorted({k.split('.')[0] for k in sys.modules} & "
@@ -61,7 +65,7 @@ def test_the_core_is_pinned_and_imports_no_runtime_stack() -> None:
 
 def test_both_readers_agree_on_every_synthetic_invoice() -> None:
     docs = _corpus()
-    assert len(docs) > 100  # the comparison reads the corpus it claims to
+    assert len(docs) == 390  # the comparison reads the corpus it claims to, exactly
     for name, data in docs:
         kit_doc, core_doc = parse_ubl(data), core.parse_ubl(data)
         different = {f: v for f, v in _shared(kit_doc, core_doc).items() if v[0] != v[1]}
@@ -72,22 +76,29 @@ def test_both_readers_agree_on_every_synthetic_invoice() -> None:
 
 PARITY_GAPS = {
     # An invoice with no VAT breakdown (cac:TaxTotal/cac:TaxSubtotal): the kit accepts it, the
-    # core refuses it ("VAT subtotals do not sum to TaxAmount"). Whether EN 16931 requires the
-    # breakdown is [de confirmat] in the artefacts RESEARCH_LOG R3 cites.
-    "no_vat_breakdown": ("accepted", "refused"),
+    # core refuses it for that reason. Whether EN 16931 requires the breakdown is [de confirmat]
+    # in the artefacts RESEARCH_LOG R3 cites. (kit, core); a refusal names its reason.
+    "no_vat_breakdown": ("accepted", "refused: VAT subtotals do not sum to TaxAmount"),
 }
 
 
 def _outcome(read, error, data: bytes) -> str:
     try:
         read(data)
-    except error:
-        return "refused"
+    except error as exc:
+        return f"refused: {exc}"
     return "accepted"
+
+
+def _same(observed: str, declared: str) -> bool:
+    """An acceptance is exact; a refusal must say the declared reason."""
+    if declared == "accepted":
+        return observed == "accepted"
+    return observed.startswith("refused: ") and declared.removeprefix("refused: ") in observed
 
 
 @pytest.mark.parametrize("gap", sorted(PARITY_GAPS))
 def test_each_declared_gap_still_holds_exactly(gap: str) -> None:
     data = {"no_vat_breakdown": ubl()}[gap]  # the kit's own test invoice has no breakdown
     observed = (_outcome(parse_ubl, UblError, data), _outcome(core.parse_ubl, core.UblError, data))
-    assert observed == PARITY_GAPS[gap]
+    assert all(map(_same, observed, PARITY_GAPS[gap])), observed

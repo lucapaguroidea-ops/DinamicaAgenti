@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from decimal import Decimal
 
+from kit import calendar
 from kit.bind import candidates
 from kit.catalog import Catalog
 from kit.period import ExpectedItem, ExplainedRule, expected_set_hash, period_diff
@@ -477,6 +478,22 @@ def _release_lock(cat, d: Dossier, issue, facts, detail) -> dict:
     return {"locked": False, "diffed": False, "suggested": False, "v2": None}
 
 
+# ----- The calendar (WP-21) -----
+
+
+def _obligations(cat, d: Dossier, issue, facts, detail) -> dict:
+    """The core's calendar for the client-month, on the period's CO.DiT as stored.
+
+    The CO.DiT is not translated: an axis or value outside the core catalog's vocabulary refuses
+    (``calendar.check_axes``), so no filing is dropped silently (P10).
+    """
+    period = issue.split(":")[2]
+    axes = d.codit(period)
+    if axes is None:
+        raise StepError(f"no CO.DiT for {period}: set it first (kit dossier set-codit)")
+    return calendar.month_calendar(calendar.core_catalog(), axes, period, calendar.today())
+
+
 EXECUTORS: dict[tuple[str, str], Executor] = {
     ("batch", "emit"): _emit,
     ("batch", "emit_children"): _emit_children,
@@ -490,6 +507,7 @@ EXECUTORS: dict[tuple[str, str], Executor] = {
     ("close", "lock"): _lock,
     ("close", "period_diff"): _period_diff,
     ("close", "release_lock"): _release_lock,
+    ("calendar", "obligations"): _obligations,
 }
 
 
@@ -497,6 +515,8 @@ def derive(d: Dossier, issue: str, facts: dict) -> dict:
     """Facts that follow from other issues, recomputed on every wake (never stored)."""
     if issue.startswith("close:"):
         return {**facts, "recon_open": recon_open(d, issue.split(":")[2])}
+    if issue.startswith("calendar:"):
+        return {**facts, "today": calendar.today().isoformat()}
     return facts
 
 

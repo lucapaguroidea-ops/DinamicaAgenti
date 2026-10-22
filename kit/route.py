@@ -255,11 +255,48 @@ def route_close(f: CloseFacts) -> Step:
     return _done("filed")
 
 
+# ----- The calendar: calendar:{cui}:{period} (WP-21) -----
+
+
+class CalendarFacts(Closed):
+    today: str = ""  # derived on every wake (the UTC date), never stored
+    computed_on: str | None = None  # the day the core's calendar was last asked
+    catalog_commit: str | None = None  # the PoartaContabila commit whose catalog was read
+    freshness: str | None = None  # why the register pin may not date anything, or None
+    items: list[dict] = []
+    refused: list[dict[str, str]] = []
+    later: list[dict[str, str]] = []
+
+
+def calendar_refusal(f: CalendarFacts) -> str:
+    """Every reason the calendar refuses, for the person who holds it (P10)."""
+    reasons = [f"register: {f.freshness}"] if f.freshness else []
+    reasons += [f"{r['form']} ({r['filing_id']}): {r['reason']}" for r in f.refused]
+    return "the calendar refuses: " + "; ".join(reasons)
+
+
+def route_calendar(f: CalendarFacts) -> Step:
+    """Ask the core, hold on any refusal or a register not fresh, else done.
+
+    A partially refused calendar asked again on a later day replaces its dated items too (they are
+    recomputed with the rest); that is acceptable because nothing acts on a held calendar.
+    """
+    if f.computed_on is None:
+        return _kit("obligations")
+    if f.freshness or f.refused:
+        if f.today and f.computed_on != f.today:  # a new day: ask the core again
+            return _kit("obligations")
+        return _hold("calendar_refuses", calendar_refusal(f))
+    later = f", {len(f.later)} later" if f.later else ""
+    return _done("dated", f"{len(f.items)} dated{later}")
+
+
 _ROUTES = {
     "batch": (BatchFacts, route_batch),
     "job": (JobFacts, route_job),
     "recon": (ReconFacts, route_recon),
     "close": (CloseFacts, route_close),
+    "calendar": (CalendarFacts, route_calendar),
 }
 
 

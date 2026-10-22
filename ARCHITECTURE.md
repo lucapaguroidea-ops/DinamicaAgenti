@@ -340,11 +340,20 @@ dossiers/{cui}/
 | Builder, Reviewer | coding agents | build this repository on test data; fresh-context review of the diff |
 
 - **Projects:** one per client; one Build project.
-- **Issue kinds** (label + title `{key} [{cui}]`): `batch`, `job`, `recon`, `close`; a question
+- **Issue kinds** (label + title `{key} [{cui}]`): `batch`, `job`, `recon`, `close`, `calendar`; a question
   is a card on its issue (§5), not an issue. A `job` is a child of its month's `close`; `close`
   waits while `recon` has open questions.
 - **Routines:** recheck the Reconcile window when a books export arrives; retry parked reads; the
-  import agent's pull; the month's close on the cabinet's date.
+  import agent's pull; the month's close on the cabinet's date; the month's calendar.
+- **The calendar** (`kit/calendar.py`, WP-21): `calendar:{cui}:{period}` asks the pinned core's
+  `obligations` on the period's CO.DiT and the UTC date, and records each owed filing as dated
+  (due date, lock set), refused or later, with the core's reason, plus `register_freshness`. A
+  refusal or a register that is not fresh holds the issue for the accountant with every reason
+  (P10); a held calendar is asked again on a later day; a dated one is never recomputed. The
+  pinned package ships no catalog: `POARTA_CATALOG_DIR` names the core's `catalog/` in a
+  clean git checkout at exactly the pinned commit (D4), else the calendar is held with that reason.
+  A CO.DiT axis or value outside the core's `ArticoleCoDitAxes` holds it too, naming each one:
+  the kit's vocabulary differs from the core's until WP-20 replaces `catalog.py`.
 - **Budgets:** per model role (agent scope) and per client (project scope), with hard stops: a
   stopped role refuses and a person is asked.
 
