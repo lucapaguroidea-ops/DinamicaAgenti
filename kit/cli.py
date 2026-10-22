@@ -57,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--actor", choices=["person", "saga_agent"], default="person")
     a.add_argument("--catalog", type=Path, default=Path("catalog"))
     ro = sub.add_parser("route", help="the next step of an issue, from its facts (JSON)")
-    ro.add_argument("--procedure", required=True, choices=["batch", "job", "recon", "close"])
+    ro.add_argument(
+        "--procedure", required=True, choices=["batch", "job", "recon", "close", "calendar"]
+    )
     ro.add_argument("--facts", type=Path, required=True, help="the issue's facts (JSON)")
     sc = sub.add_parser("scenario", help="an invented firm's month, end to end (synthetic)")
     sc.add_argument("firm", help="one of: " + ", ".join(FIRMS))

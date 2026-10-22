@@ -16,6 +16,7 @@ labels:
   job: "#2563eb"
   recon: "#d97706"
   close: "#7c3aed"
+  calendar: "#059669"
   hank: "#0891b2"
   question: "#dc2626"
   hold: "#b91c1c"
@@ -88,6 +89,10 @@ routines:
     title: "close:{cui}: închiderea lunii"
     assignee: dispatcher
     trigger: {kind: schedule, cronExpression: "45 8 5 * *", timezone: Europe/Bucharest}  # owner: the cabinet's date
+  month_calendar:
+    title: "calendar:{cui}: termenele lunii"   # the month's items with their due dates (WP-21)
+    assignee: dispatcher
+    trigger: {kind: schedule, cronExpression: "35 8 1 * *", timezone: Europe/Bucharest}  # owner: the cabinet's date
 
 # People. Their Paperclip user ids are the owner's to give (D4); the board is the owner.
 people:

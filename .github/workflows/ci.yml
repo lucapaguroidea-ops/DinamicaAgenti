@@ -8,6 +8,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false   # uv sync checks out the pinned core: its catalog is read there (WP-21)
       - run: uv sync
       - run: uv run ruff check . && uv run ruff format --check .
       - run: uv run pytest -q
