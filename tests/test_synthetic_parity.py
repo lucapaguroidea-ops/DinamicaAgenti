@@ -48,7 +48,7 @@ def _core_invoices() -> list[tuple[str, object]]:
     for its own reason: the 20 credit notes, because the kit never draws one (gap
     ``month_shape``); the 10 foreign purchases in EUR, because the kit does draw them but its book
     refuses to post them and routes them to a person, while the core's posts them (gap
-    ``foreign_purchase_posting``, decided by D5)."""
+    ``foreign_purchase_posting``; D5 decides the non-payer's 3, not the payer's 7)."""
     out = []
     for key, firm in core.synthetic.FIRMS.items():
         for inv in realistic(firm, PERIODS, seed=SEED).invoices():
@@ -239,8 +239,9 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     ),
     # The core's foreign purchases in EUR over the quarter (7 for abroad, 3 for neplatitor): the
     # kit's book refuses every one and routes it to a person (``to_person``), posting nothing; the
-    # core's posts each, as (debit, credit) synthetic accounts. D5 decides this gap; it is not a
-    # separate decision.
+    # core's posts each, as (debit, credit) synthetic accounts. D5 decides neplatitor's 3, the
+    # non-payer's reverse-charge accounts; the kit routes all 10 to a person pending D5, but
+    # abroad's 7 are a VAT payer's reverse charge, which D5 does not decide.
     "foreign_purchase_posting": (
         {"abroad": (7, ["to a person"]), "neplatitor": (3, ["to a person"])},
         {
