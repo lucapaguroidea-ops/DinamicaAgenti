@@ -591,9 +591,9 @@ def test_what_agrees_overall_and_on_the_live_paths() -> None:
 
 def test_the_4428_figures_are_what_gap_m1_8_figures_says() -> None:
     """Where M1_8 fails on both sides, each figure is recomputed from its side's inputs: the
-    kit's open VAT is the absolute of this month's ``vat_open``, its 4428 the absolute of the
-    balance; the core's open VAT is its ``open_4428`` over this month and ``prior``, its 4428 the
-    signed balance (debit +)."""
+    kit's open VAT is the sum of this month's ``vat_open``, its 4428 the balance, both signed
+    credit − debit; the core's open VAT is its ``open_4428`` over this month and ``prior``, its
+    4428 the signed balance (debit +)."""
     seen = 0
     for case, k, _, runs in _cases():
         figures = _m1_8(k, runs)
@@ -603,8 +603,8 @@ def test_the_4428_figures_are_what_gap_m1_8_figures_says() -> None:
         (ko, kh), (co, ch) = figures
         items = _kit_items(key, period, with_bank)
         balance = Decimal(_witness(key, period, True)[1]["4428"])
-        assert Decimal(ko) == abs(sum(Decimal(i.vat_open) for i in items if i.vat_open))
-        assert Decimal(kh) == abs(balance) and Decimal(ch) == -balance
+        assert Decimal(ko) == sum(Decimal(i.vat_open) for i in items if i.vat_open)
+        assert Decimal(kh) == balance and Decimal(ch) == -balance
         want = core.open_4428(_expected(key, period, with_bank), _prior(key, period, with_bank))
         assert Decimal(co) == want
         seen += 1
@@ -772,12 +772,12 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     # ("not computed in v1", advisory: INFO).
     "not_computed_by_the_core": ({"PASS": 120}, {"INFO": 120}),
     # TVA la încasare, M1_8 failing on both sides: the kit's open VAT is this month's
-    # documents' (as an absolute) against the balance of 4428 as an absolute; the core's is this
+    # documents' against the balance of 4428, both signed credit − debit; the core's is this
     # and the two months before's, signed (debit +), against the signed balance.
     "m1_8_figures": (
         {
-            "open 2595.87, 4428 1293.56": 4,
-            "open 2002.39, 4428 1209.16": 4,
+            "open -2595.87, 4428 1293.56": 4,
+            "open -2002.39, 4428 1209.16": 4,
             "open 1819.26, 4428 2595.31": 4,
         },
         {

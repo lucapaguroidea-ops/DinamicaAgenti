@@ -16,6 +16,7 @@ from kit.period import (
     weigh_suggestion,
 )
 from kit.recon import JournalLine, SinkDoc, Witness
+from kit.synthetic import FIRMS
 
 ROOT = Path(__file__).resolve().parents[1]
 PARTNER, BUYER = "73645193", "31415920"
@@ -207,6 +208,33 @@ def test_4428_open_needs_the_balance_and_ties_to_the_open_vat(cat):
     assert status(ok, "m1_8_4428_open") == "PASS"
     off = diff(cat, [it], axes=axes, balances={"4428": "25.00"})
     assert status(off, "m1_8_4428_open") == "FAIL"
+
+
+def test_a_wrong_sided_4428_fails_m1_8(cat):
+    # Invented figures. Both sides are credit − debit: a purchase's open VAT is −, a sale's +.
+    # The month's only open document is a purchase with VAT 190.00, booked 4428 Dr 190; an
+    # erroneous carried credit of 380.00 leaves 4428 at credit 190.00. Same size, wrong side.
+    axes = FIRMS["incasare"].axes
+    purchase = item(vat="190.00", gross="1190.00", vat_open="-190.00")
+    d = diff(cat, [purchase], axes=axes, balances={"4428": "190.00"})
+    assert status(d, "m1_8_4428_open") == "FAIL"
+    sale = item(doc_class="iesire", vat="190.00", gross="1190.00", vat_open="190.00")
+    d = diff(cat, [sale], axes=axes, balances={"4428": "-190.00"})
+    assert status(d, "m1_8_4428_open") == "FAIL"
+
+
+def test_a_rightly_sided_4428_passes_m1_8(cat):
+    axes = FIRMS["incasare"].axes
+    purchase = item(vat="190.00", gross="1190.00", vat_open="-190.00")
+    d = diff(cat, [purchase], axes=axes, balances={"4428": "-190.00"})
+    assert status(d, "m1_8_4428_open") == "PASS"
+    sale = item(doc_class="iesire", vat="190.00", gross="1190.00", vat_open="190.00")
+    d = diff(cat, [sale], axes=axes, balances={"4428": "190.00"})
+    assert status(d, "m1_8_4428_open") == "PASS"
+    both = [purchase, item(job="j2", doc_class="iesire", number="FV-2", vat_open="300.00")]
+    assert status(diff(cat, both, axes=axes, balances={"4428": "110.00"}), "m1_8_4428_open") == (
+        "PASS"
+    )
 
 
 def test_advisory_controls_never_make_the_month_material(cat):
