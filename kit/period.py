@@ -412,9 +412,10 @@ def _maps(ctx, row):
 def _m1_8(ctx, row):
     if ctx.balances is None or "4428" not in ctx.balances:
         return "FAIL", "cannot be computed: no balance of 4428"
-    # vat_open is signed like 4428's movement: sales + (credit), purchases − (debit)
-    open_vat = abs(sum((Decimal(i.vat_open) for i in ctx.expected if i.vat_open), Decimal(0)))
-    held = abs(Decimal(ctx.balances["4428"]))
+    # Both signed credit − debit: vat_open like 4428's movement (sales +, purchases −), the
+    # balance as the books give it. Compared signed, so a 4428 on the wrong side fails.
+    open_vat = sum((Decimal(i.vat_open) for i in ctx.expected if i.vat_open), Decimal(0))
+    held = Decimal(ctx.balances["4428"])
     if abs(open_vat - held) >= Decimal("0.01"):
         return "FAIL", f"open VAT {open_vat} against 4428 {held}"
     return "PASS", "4428 holds the open VAT"
