@@ -41,4 +41,4 @@ addopts = "--strict-markers"
 markers = ["law(*ids): the LAW.md principles this test enforces (P<n>)"]
 
 [tool.uv.sources]
-poarta-contabila = { git = "https://github.com/lucapaguroidea-ops/PoartaContabila", rev = "413c71c151411682a093a28f4f7d3d62dbec5992" }
+poarta-contabila = { git = "https://github.com/lucapaguroidea-ops/PoartaContabila", rev = "a2579866a4023f038f5ff87a32b56e5d318dfc43" }
