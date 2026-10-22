@@ -25,7 +25,7 @@ from decimal import Decimal
 from kit import calendar
 from kit.bind import candidates
 from kit.catalog import Catalog
-from kit.period import ExpectedItem, ExplainedRule, expected_set_hash, period_diff
+from kit.period import ExpectedItem, ExplainedRule, close_kind, expected_set_hash, period_diff
 from kit.questions import question_hash
 from kit.recon import Doc, Witness, pick_profile, post_check, pre_check
 from kit.route import ReconFacts, route_recon
@@ -328,10 +328,20 @@ def _jobs_of(d: Dossier, period: str) -> list[tuple[str, dict]]:
     return [(j.job_id, d.facts(_job_issue(j.job_id))) for j in d.jobs(period)]
 
 
+def _post_default(cat: Catalog, d: Dossier, period: str) -> str:
+    """The POST profile of the period's close kind (its ``recon_profile`` in the catalog): the
+    default for a fiscal class without a POST profile of its own. No close kind refuses (P10)."""
+    kind = close_kind(cat, axes_for(cat, d, period))
+    if kind is None:
+        raise StepError(f"no close kind fits the CO.DiT of {period} (tva / exig): no POST profile")
+    return cat.get("CloseKind", kind).recon_profile
+
+
 def _recheck_window(cat, d: Dossier, issue, facts, detail) -> dict:
     """Every Job stopped at PRE, against the books as they are now; acked Jobs through POST."""
     period = issue.split(":")[2]
     to_review, ambiguous, missing, how = [], [], set(), []
+    post_default: str | None = None
     for job_id, jf in _jobs_of(d, period):
         if "_doc" not in jf:
             continue
@@ -352,8 +362,9 @@ def _recheck_window(cat, d: Dossier, issue, facts, detail) -> dict:
         elif jf.get("status") == "acked" and jf.get("bound_articol"):
             art = cat.get("Articol", jf["bound_articol"])
             w, _ = books(d, [doc.date[:7]])
+            post_default = post_default or _post_default(cat, d, period)
             p = post_check(
-                pick_profile(cat, "post", jf["_fiscal_class"]),
+                pick_profile(cat, "post", jf["_fiscal_class"], post_default),
                 art.reconcile.expect_accounts,
                 doc,
                 w,
