@@ -19,6 +19,8 @@ The firm around the system (`ARCHITECTURE.md` §8), on `paperclipai@2026.1012.0`
   and five routines (recheck the Reconcile window when a books export arrives — a webhook;
   retry parked reads; the import agent's pull; the month's close on the cabinet's date; the
   month's calendar, its filings with their due dates from the pinned core, WP-21).
+  Gap: the `month_close` and `month_calendar` routine titles (`close:{cui}: …`,
+  `calendar:{cui}: …`) carry no period, so `kit dispatch` cannot route the issues they open yet.
 - **Budgets:** hard stops per agent, per client project and for the company. The values marked
   `owner` start at 0, which spends nothing.
 

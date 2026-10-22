@@ -482,7 +482,11 @@ def _release_lock(cat, d: Dossier, issue, facts, detail) -> dict:
 
 
 def _obligations(cat, d: Dossier, issue, facts, detail) -> dict:
-    """The core's calendar for the client-month, on the period's CO.DiT as stored."""
+    """The core's calendar for the client-month, on the period's CO.DiT as stored.
+
+    The CO.DiT is not translated: an axis or value outside the core catalog's vocabulary refuses
+    (``calendar.check_axes``), so no filing is dropped silently (P10).
+    """
     period = issue.split(":")[2]
     axes = d.codit(period)
     if axes is None:

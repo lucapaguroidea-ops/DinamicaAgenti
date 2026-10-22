@@ -18,5 +18,6 @@ jobs:
           git -C "$core" fetch -q --depth 1 https://github.com/lucapaguroidea-ops/PoartaContabila "$commit"
           git -C "$core" checkout -q FETCH_HEAD
           test "$(git -C "$core" rev-parse HEAD)" = "$commit"
+          test -z "$(git -C "$core/catalog" status --porcelain --untracked-files=all --ignored=matching -- .)"
           echo "POARTA_CATALOG_DIR=$core/catalog" >> "$GITHUB_ENV"
       - run: uv run pytest -q

@@ -19,8 +19,14 @@ fresh, holds the issue for a person with the reasons (P10).
 **The core's catalog.** The pinned package ships the core's code, not its catalog, so the
 catalog directory is configured with the core's own variable, ``POARTA_CATALOG_DIR`` (a
 PoartaContabila checkout's ``catalog/``, D4). It must be a git checkout at exactly the commit
-``pyproject.toml`` pins; anything else refuses, so a calendar is never read from another
-commit's terms.
+``pyproject.toml`` pins, it must be that checkout's ``catalog/`` and the tree under it must be
+clean (``git status`` lists nothing); anything else refuses, so a calendar is never read from
+another commit's terms or from edited ones.
+
+**The vocabulary.** The CO.DiT is checked against the core catalog's own ``ArticoleCoDitAxes``
+before the core is asked: an axis or value it does not know refuses, since ``due_filings`` would
+otherwise drop a filing silently. The kit's vocabulary differs from the core's until WP-20
+replaces ``catalog.py``; nothing is mapped here.
 
 **The day.** The core reads no clock. ``today()`` is the UTC date; the step records the day it
 asked on (``computed_on``), and a held calendar is asked again on a later day, so a refusal
@@ -62,17 +68,56 @@ def pinned_commit() -> str:
     return commit
 
 
-def _head(path: Path) -> str | None:
+def _git(path: Path, *args: str) -> str | None:
     try:
         out = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            ["git", "-C", str(path), *args],
             capture_output=True,
             text=True,
             timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout.strip() if out.returncode == 0 else None
+    return out.stdout if out.returncode == 0 else None
+
+
+def _head(path: Path) -> str | None:
+    out = _git(path, "rev-parse", "HEAD")
+    return out.strip() if out is not None else None
+
+
+def checkout_refusal(path: Path, commit: str) -> str | None:
+    """Why ``path`` is not a clean ``catalog/`` of a checkout at ``commit``; ``None`` if it is.
+
+    Clean means ``git status`` lists nothing under it: no modified, staged, deleted, untracked or
+    ignored file, so the catalog read is exactly the pinned commit's tree.
+    """
+    head = _head(path)
+    if head != commit:
+        return (
+            f"{CATALOG_ENV} is not the pinned core's catalog: its checkout is at"
+            f" {head[:7] if head else 'no git commit'}, the pin is {commit[:7]}"
+        )
+    prefix = (_git(path, "rev-parse", "--show-prefix") or "").strip()
+    if prefix != "catalog/":
+        where = repr(prefix) if prefix else "the checkout root"
+        return (
+            f"{CATALOG_ENV} is not the pinned core's catalog: it is {where} of the checkout,"
+            " not catalog/"
+        )
+    status = _git(
+        path, "status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--", "."
+    )
+    if status is None:
+        return f"{CATALOG_ENV} is not the pinned core's catalog: git status failed"
+    if status.strip():
+        changed = ", ".join(line[3:] for line in status.splitlines()[:5])
+        more = " …" if len(status.splitlines()) > 5 else ""
+        return (
+            f"{CATALOG_ENV} is not the pinned core's catalog: its checkout at {commit[:7]} is"
+            f" modified: {changed}{more}"
+        )
+    return None
 
 
 def core_catalog(env: dict[str, str] | None = None) -> core.Catalog:
@@ -86,20 +131,49 @@ def core_catalog(env: dict[str, str] | None = None) -> core.Catalog:
             f" checkout's catalog/ at {commit[:7]} (D4)"
         )
     path = Path(where)
-    head = _head(path)
-    if head != commit:
-        raise CalendarUnavailable(
-            f"{CATALOG_ENV} is not the pinned core's catalog: its checkout is at"
-            f" {(head or 'no git commit')[:7]}, the pin is {commit[:7]}"
-        )
+    refusal = checkout_refusal(path, commit)
+    if refusal:
+        raise CalendarUnavailable(refusal)
     try:
         return core.load_catalog(path)
     except core.CatalogError as exc:
         raise CalendarUnavailable(f"the core's catalog does not load: {exc}") from exc
 
 
+def core_axes(cat: core.Catalog) -> dict[str, list]:
+    """The CO.DiT vocabulary the core's catalog knows (``ArticoleCoDitAxes``): axis → values."""
+    doc = cat.docs.get("ArticoleCoDitAxes") or {}
+    out = {k: list(v) for k, v in (doc.get("existing_axes") or {}).items()}
+    out.update({k: list(v["values"]) for k, v in (doc.get("new_axes") or {}).items()})
+    return out
+
+
+def check_axes(cat: core.Catalog, axes: dict[str, str]) -> None:
+    """Refuse a CO.DiT the core's vocabulary does not know: an axis id or a value outside it.
+
+    The core's ``due_filings`` keeps only the rows whose ``require`` an axis value matches, so a
+    value it does not know would drop a filing without a refusal. Nothing is translated here: the
+    kit's and the core's vocabularies are reconciled in WP-20 (``catalog.py``).
+    """
+    known = core_axes(cat)
+    if not known:
+        raise CalendarUnavailable("the core's catalog has no CO.DiT vocabulary (ArticoleCoDitAxes)")
+    bad = []
+    for axis, value in sorted(axes.items()):
+        if axis not in known:
+            bad.append(f"axis {axis!r} (= {value!r}) is not one of the core's")
+        elif value not in known[axis]:
+            bad.append(f"{axis}: {value!r} is not one of the core's {known[axis]}")
+    if bad:
+        raise CalendarUnavailable(
+            "the CO.DiT is outside the core's vocabulary, so a filing could be dropped: "
+            + "; ".join(bad)
+        )
+
+
 def month_calendar(cat: core.Catalog, axes: dict[str, str], period: str, as_of: date) -> dict:
     """The facts of one client-month's calendar: the core's answer, every filing kept."""
+    check_axes(cat, axes)
     result = core.obligations(cat, axes, period, None, as_of=as_of)
     items = [
         {
@@ -119,6 +193,7 @@ def month_calendar(cat: core.Catalog, axes: dict[str, str], period: str, as_of: 
     ]
     return {
         "computed_on": as_of.isoformat(),
+        "catalog_commit": pinned_commit(),
         "freshness": core.register_freshness(cat, as_of),
         "items": items,
         "refused": [dict(r) for r in result.refused],

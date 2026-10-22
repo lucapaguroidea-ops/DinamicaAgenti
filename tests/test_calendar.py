@@ -53,20 +53,18 @@ FREQ = {"tva_period": "lunar", "d100_period": "trimestrial", "d112_period": "lun
 def _pinned_checkout() -> Path:
     """The core's catalog at the pinned commit: ``POARTA_CATALOG_DIR``, else a uv-cache checkout.
 
-    A set variable is the only source: its checkout's HEAD must be the pin, or the tests fail.
+    A set variable is the only source: it must be a clean ``catalog/`` of a checkout at the pin
+    (the kit's own ``checkout_refusal``, as CI checks), or the tests fail.
     """
     commit = kcal.pinned_commit()
     where = os.environ.get(kcal.CATALOG_ENV)
     if where:
         path = Path(where)
-        head = kcal._head(path)
-        if head != commit:
-            pytest.fail(
-                f"{kcal.CATALOG_ENV}={where} is not the pinned core's catalog: its checkout is at"
-                f" {(head or 'no git commit')[:7]}, the pin is {commit[:7]}"
-            )
         if not path.is_dir():
             pytest.fail(f"{kcal.CATALOG_ENV}={where} is not a directory")
+        refusal = kcal.checkout_refusal(path, commit)
+        if refusal:
+            pytest.fail(refusal)
         return path
     try:
         cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, text=True, check=True)
@@ -74,11 +72,11 @@ def _pinned_checkout() -> Path:
     except (OSError, subprocess.SubprocessError):
         found = []
     for path in found:
-        if kcal._head(path) == commit and (path / "catalog").is_dir():
+        if (path / "catalog").is_dir() and kcal.checkout_refusal(path / "catalog", commit) is None:
             return path / "catalog"
     pytest.fail(
-        f"no catalog of the pinned core {commit[:7]}: set {kcal.CATALOG_ENV} to the catalog/ of a"
-        f" PoartaContabila checkout at {commit} (git fetch --depth 1 origin {commit};"
+        f"no clean catalog of the pinned core {commit[:7]}: set {kcal.CATALOG_ENV} to the catalog/"
+        f" of a PoartaContabila checkout at {commit} (git fetch --depth 1 origin {commit};"
         " git checkout FETCH_HEAD)"
     )
 
@@ -183,9 +181,75 @@ def test_no_core_catalog_holds_the_client_with_the_reason(cat, firm, monkeypatch
 
 
 @pytest.mark.law("P10")
-def test_a_catalog_at_another_commit_is_refused(tmp_path):
-    with pytest.raises(kcal.CalendarUnavailable, match="not the pinned core's catalog"):
+def test_a_directory_outside_git_is_refused(tmp_path):
+    with pytest.raises(kcal.CalendarUnavailable, match="checkout is at no git commit"):
         kcal.core_catalog({kcal.CATALOG_ENV: str(tmp_path)})
+
+
+def _git(repo: Path, *args: str) -> str:
+    out = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    )
+    return out.stdout.strip()
+
+
+@pytest.fixture
+def clone(real_dir, tmp_path, monkeypatch) -> Path:
+    """A throwaway git repo holding a copy of the pinned catalog, its commit faked as the pin."""
+    import shutil
+
+    repo = tmp_path / "core"
+    shutil.copytree(real_dir, repo / "catalog")
+    _git(repo.parent, "init", "-q", str(repo))
+    for key, value in (("user.email", "t@example.invalid"), ("user.name", "t")):
+        _git(repo, "config", key, value)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "catalog")
+    head = _git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(kcal, "pinned_commit", lambda: head)
+    return repo
+
+
+def _terms(repo: Path) -> Path:
+    return repo / "catalog" / "60_practice" / "ARTICOLE_TERMS_v1.yaml"
+
+
+def test_the_clean_pinned_checkout_is_accepted(clone):
+    cat = kcal.core_catalog({kcal.CATALOG_ENV: str(clone / "catalog")})
+    assert cat.docs["ArticoleTerms"]["register"]["max_age_days"] is None
+
+
+@pytest.mark.law("P10")
+def test_an_edited_catalog_at_the_pin_is_refused(clone):
+    terms = _terms(clone)
+    text = terms.read_text(encoding="utf-8")
+    assert "max_age_days: null" in text
+    terms.write_text(text.replace("max_age_days: null", "max_age_days: 99999"), encoding="utf-8")
+    with pytest.raises(kcal.CalendarUnavailable, match="is modified: .*ARTICOLE_TERMS_v1.yaml"):
+        kcal.core_catalog({kcal.CATALOG_ENV: str(clone / "catalog")})
+
+
+@pytest.mark.law("P10")
+def test_an_untracked_file_in_the_catalog_is_refused(clone):
+    (clone / "catalog" / "60_practice" / "EXTRA_v1.yaml").write_text("x: 1\n", encoding="utf-8")
+    with pytest.raises(kcal.CalendarUnavailable, match="is modified: .*EXTRA_v1.yaml"):
+        kcal.core_catalog({kcal.CATALOG_ENV: str(clone / "catalog")})
+
+
+@pytest.mark.law("P10")
+def test_a_directory_other_than_the_checkouts_catalog_is_refused(clone):
+    for where, named in ((clone, "the checkout root"), (clone / "catalog" / "60_practice", "")):
+        with pytest.raises(kcal.CalendarUnavailable, match=f"is {named}.*not catalog/"):
+            kcal.core_catalog({kcal.CATALOG_ENV: str(where)})
+
+
+@pytest.mark.law("P10")
+def test_a_catalog_at_another_commit_is_refused(clone):
+    pin = _git(clone, "rev-parse", "HEAD")
+    _terms(clone).write_text(_terms(clone).read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    _git(clone, "commit", "-q", "-am", "another commit")
+    with pytest.raises(kcal.CalendarUnavailable, match=f"the pin is {pin[:7]}"):
+        kcal.core_catalog({kcal.CATALOG_ENV: str(clone / "catalog")})
 
 
 def test_the_catalog_read_is_the_pinned_commits(real):
@@ -205,6 +269,8 @@ def test_the_real_catalog_refuses_every_owed_filing_and_the_client_is_held(
     pc = Fake()
     tick = dispatch(cat, ROOT, firm, ISSUE, pc, company())
     real = kcal.core_catalog()
+    # A deliberate tripwire: these fail when the owner sets the freshness window or pins a year
+    # and the core pin moves to that commit; the test is then rewritten for the new state.
     assert real.docs["ArticoleTerms"]["register"]["max_age_days"] is None
     assert real.docs["ArticoleNonWorking"]["years"] == []
 
@@ -328,3 +394,37 @@ def test_the_recorded_facts_are_plain_json(cat, firm, real, monkeypatch):
     dispatch(cat, ROOT, firm, ISSUE, Fake(), company())
     f = firm.facts(ISSUE)
     assert json.loads(json.dumps(f)) == f
+    assert f["catalog_commit"] == kcal.pinned_commit()  # which core catalog was read
+
+
+# ----- the CO.DiT vocabulary: the core's, not translated -----
+
+
+@pytest.mark.law("P10")
+@pytest.mark.parametrize(
+    ("axis", "value"),
+    [("impozit", "micro_3"), ("exig", "tva_la_livrare"), ("forma", "ii")],
+)
+def test_a_codit_value_the_core_does_not_know_holds_the_calendar(
+    cat, tmp_path, real, monkeypatch, axis, value
+):
+    d = open_dossier(tmp_path, CUI)
+    d.set_codit(PERIOD, {**FIRM.axes, **FREQ, axis: value})
+    on(monkeypatch, verified(real) + timedelta(days=10), invented(real))
+    pc = Fake()
+    tick = dispatch(cat, ROOT, d, ISSUE, pc, company())
+    assert tick.ended.startswith("hold: kit step obligations: the CO.DiT is outside the core's")
+    assert f"{axis}: {value!r} is not one of the core's" in tick.ended
+    assert d.facts(ISSUE).get("items") is None  # nothing recorded as dated
+    assert value in pc.comments[d.paperclip_id(ISSUE)][-1]
+
+
+@pytest.mark.law("P10")
+def test_a_codit_axis_the_core_does_not_know_is_refused(real):
+    with pytest.raises(kcal.CalendarUnavailable, match="axis 'regime'"):
+        kcal.check_axes(real, {**FIRM.axes, **FREQ, "regime": "x"})
+
+
+def test_the_core_firms_axes_are_inside_the_core_vocabulary(real):
+    for firm in core.synthetic.FIRMS.values():
+        kcal.check_axes(real, {**firm.axes, **FREQ})

@@ -350,8 +350,10 @@ dossiers/{cui}/
   (due date, lock set), refused or later, with the core's reason, plus `register_freshness`. A
   refusal or a register that is not fresh holds the issue for the accountant with every reason
   (P10); a held calendar is asked again on a later day; a dated one is never recomputed. The
-  pinned package ships no catalog: `POARTA_CATALOG_DIR` names the core's `catalog/` in a git
-  checkout at exactly the pinned commit (D4), else the calendar is held with that reason.
+  pinned package ships no catalog: `POARTA_CATALOG_DIR` names the core's `catalog/` in a
+  clean git checkout at exactly the pinned commit (D4), else the calendar is held with that reason.
+  A CO.DiT axis or value outside the core's `ArticoleCoDitAxes` holds it too, naming each one:
+  the kit's vocabulary differs from the core's until WP-20 replaces `catalog.py`.
 - **Budgets:** per model role (agent scope) and per client (project scope), with hard stops: a
   stopped role refuses and a person is asked.
 

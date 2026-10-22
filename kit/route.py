@@ -261,6 +261,7 @@ def route_close(f: CloseFacts) -> Step:
 class CalendarFacts(Closed):
     today: str = ""  # derived on every wake (the UTC date), never stored
     computed_on: str | None = None  # the day the core's calendar was last asked
+    catalog_commit: str | None = None  # the PoartaContabila commit whose catalog was read
     freshness: str | None = None  # why the register pin may not date anything, or None
     items: list[dict] = []
     refused: list[dict[str, str]] = []
@@ -275,6 +276,11 @@ def calendar_refusal(f: CalendarFacts) -> str:
 
 
 def route_calendar(f: CalendarFacts) -> Step:
+    """Ask the core, hold on any refusal or a register not fresh, else done.
+
+    A partially refused calendar asked again on a later day replaces its dated items too (they are
+    recomputed with the rest); that is acceptable because nothing acts on a held calendar.
+    """
     if f.computed_on is None:
         return _kit("obligations")
     if f.freshness or f.refused:
