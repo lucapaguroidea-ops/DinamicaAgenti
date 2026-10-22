@@ -4,7 +4,12 @@ version = "0.0.1"
 description = "Gated paths for documente primare to SAGA C: the gate kit, catalog and hanks"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["defusedxml>=0.7", "pydantic>=2.7", "pyyaml>=6"]
+dependencies = [
+    "defusedxml>=0.7",
+    "poarta-contabila",
+    "pydantic>=2.7",
+    "pyyaml>=6",
+]
 
 [project.scripts]
 kit = "kit.cli:main"
@@ -34,3 +39,6 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = ["law(*ids): the LAW.md principles this test enforces (P<n>)"]
+
+[tool.uv.sources]
+poarta-contabila = { git = "https://github.com/lucapaguroidea-ops/PoartaContabila", rev = "413c71c151411682a093a28f4f7d3d62dbec5992" }
