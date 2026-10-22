@@ -49,7 +49,16 @@ the kit's bound counterpart nor the core's VAT made exigible by a payment under 
 runs), ``open_pre`` and ``lock_mismatch`` (the core's close holds those outside
 ``build_period_diff``), a waiting expense-report part, analytic accounts that do not tie, 4423 /
 4424 / 5311 movement, a close kind for ``tva_091``, nor which side's accounts are right, which
-the catalog and the SAGA C loops decide.
+the catalog and the SAGA C loops decide. Nor does it prove agreement on a month that could be
+filed: no case is non-material (all 120 are material, so ``can_file`` is false, on both sides);
+C0 never passes (it fails on both sides in all 120); M1_8 never passes (it fails on both sides in
+24 cases and is INFO in 96); the kit's C1 never fails (the core's fails only in the 60 uncovered
+cases, gap ``uncovered_month_controls``); so the agreement on materiality, ``can_file`` and C0
+says nothing about a month that could be filed. And of the 90 cases whose buckets agree, 60 agree
+empty against empty, because no export covers the month. These counts are pinned below, so the
+vacuity cannot change silently. Apart from the cases, one empty month per firm is not material on
+either side (four firms may file it), which shows only that neither side is material by
+construction.
 
 While any gap stands the kit keeps ``kit/period.py``; the owner frames the decision (BUILD WP-20).
 """
@@ -496,11 +505,11 @@ def _tags(case: tuple, k: kp.PeriodDiff, c, runs) -> Tags:
         ks, cs = kv["controls"].get(cid), cv["controls"].get(cid)
         if ks == cs:
             continue
-        if not covered and cs == "FAIL":
-            tags.append(("uncovered_month_controls", ks, "FAIL"))
+        if not covered and ks in ("PASS", "INFO") and cs == "FAIL":
+            tags.append(("uncovered_month_controls", ks, cs))
         elif cid in REGIME and (ks, cs) == ("INFO", "PASS"):
             tags.append(("regime_controls_on_a_payer", ks, cs))
-        elif cid in MAPS:
+        elif cid in MAPS and (ks, cs) == (("PASS", "INFO") if maps_exist else ("INFO", "PASS")):
             tags.append(("maps_precondition", f"maps_exist {maps_exist}: {ks}", cs))
         elif cid in NOT_COMPUTED and cs == "INFO":
             tags.append(("not_computed_by_the_core", ks, cs))
@@ -602,6 +611,81 @@ def test_the_4428_figures_are_what_gap_m1_8_figures_says() -> None:
     assert seen == 12
 
 
+def _vacuity(cases) -> dict[tuple, int]:
+    """Per (what, kit, core): materiality, ``can_file``, C0, M1_8 and C1 as each side has them,
+    and the agreeing buckets by whether they are empty and the month covered."""
+    out: Counter = Counter()
+    for (_, _, covered, _, _), k, c, runs in cases:
+        kv, cv = _kit_view(k), _core_view(c, runs, _watched())
+        out[("material", kv["material"], cv["material"])] += 1
+        out[("can_file", kv["can_file"], cv["can_file"])] += 1
+        for cid in ("c0_synthetic_parity", "m1_8_4428_open", "c1_outbound_complete"):
+            out[(cid, kv["controls"][cid], cv["controls"][cid])] += 1
+        if kv["buckets"] == cv["buckets"]:
+            out[("buckets agree", bool(kv["buckets"]), covered)] += 1
+    return dict(out)
+
+
+def test_the_agreement_on_materiality_can_file_and_c0_is_vacuous_here() -> None:
+    """Pinned so the vacuity cannot change silently (docstring, "does not prove"): every case is
+    material on both sides, so ``can_file`` is false; C0 fails on both; M1_8 never passes; the
+    kit's C1 never fails; 60 of the 90 bucket agreements are empty against empty, uncovered."""
+    assert _vacuity(_cases()) == {
+        ("material", True, True): 120,
+        ("can_file", False, False): 120,
+        ("c0_synthetic_parity", "FAIL", "FAIL"): 120,
+        ("m1_8_4428_open", "FAIL", "FAIL"): 24,
+        ("m1_8_4428_open", "INFO", "INFO"): 96,
+        ("c1_outbound_complete", "PASS", "PASS"): 60,
+        ("c1_outbound_complete", "PASS", "FAIL"): 60,
+        ("buckets agree", True, True): 30,
+        ("buckets agree", False, False): 60,
+    }
+    assert _vacuity(x for x in _cases() if _live(x[0])) == {
+        ("material", True, True): 30,
+        ("can_file", False, False): 30,
+        ("c0_synthetic_parity", "FAIL", "FAIL"): 30,
+        ("m1_8_4428_open", "FAIL", "FAIL"): 6,
+        ("m1_8_4428_open", "INFO", "INFO"): 24,
+        ("c1_outbound_complete", "PASS", "PASS"): 15,
+        ("c1_outbound_complete", "PASS", "FAIL"): 15,
+        ("buckets agree", True, True): 15,
+        ("buckets agree", False, False): 15,
+    }
+
+
+def test_an_empty_month_is_not_material_on_either_side() -> None:
+    """Apart from the cases: a covered month with no document, no line and no balanță, each firm.
+    Both sides agree on materiality, ``can_file`` and C0, and four firms may file; under TVA la
+    încasare M1_8 fails on both for want of 4428's balance. This shows only that neither side is
+    material by construction, nothing about a month with documents."""
+    period, seen = PERIODS[0], {}
+    for key, firm in core.synthetic.FIRMS.items():
+        k = kp.period_diff(
+            _kcat(),
+            period,
+            [],
+            kr.Witness(covered=[period], docs=[], lines=[]),
+            axes=_kit_axes(dict(firm.axes)),
+        )
+        eye = ExportEye(product="nextup", lines=[], balance=[], cui=firm.cui, periods=[period])
+        c, runs = core.build_period_diff(
+            _ccat(), firm.cui, period, [], eye, axes=dict(firm.axes), prior=[]
+        )
+        kv, cv = _kit_view(k), _core_view(c, runs, _watched())
+        for field in ("material", "can_file"):
+            assert kv[field] == cv[field], (key, field)
+        assert kv["controls"]["c0_synthetic_parity"] == cv["controls"]["c0_synthetic_parity"]
+        seen[key] = (kv["can_file"], kv["controls"]["c0_synthetic_parity"])
+    assert seen == {
+        "platitor": (True, "PASS"),
+        "incasare": (False, "PASS"),
+        "neplatitor": (True, "PASS"),
+        "abroad": (True, "PASS"),
+        "bonuri": (True, "PASS"),
+    }
+
+
 # ----- apart from the cases -----
 
 
@@ -671,6 +755,10 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     ),
     # T_regime_4428 / T_regime_442x on a VAT payer: the kit's rows require a non-payer, so INFO
     # (does not apply); the core's rows have no require and pass the payer inside the check.
+    # The cause is the catalogs' rows: the kit's t_regime_4428 and t_regime_442x carry
+    # require: {tva: [tva_neplatitor, tva_scutire_mici]} (catalog/60_practice/controls.yaml), the
+    # core's T_regime_4428 and T_regime_442x carry no require; so this is the catalog.py step's
+    # ground.
     "regime_controls_on_a_payer": ({"INFO": 96}, {"PASS": 96}),
     # The analytic ties (M1_1 / M1_2 and their trade extensions): the kit takes maps_exist as an
     # input (INFO while false, which every live caller passes), the core infers it from the
