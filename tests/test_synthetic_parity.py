@@ -10,6 +10,11 @@ but not the same shape, so they are compared where they can be:
 - the books: the same document is posted by both, the core's own invoices over a quarter: the
   partner and VAT accounts and every amount agree; the cost and revenue accounts do not.
 
+What the book comparison proves: that both books choose the same partner and VAT accounts on the
+same sides, and put the same total on the remaining accounts. The amounts agree largely by
+construction (the kit is fed the core's net and VAT, not its own), so the kit's own drawing of VAT
+rates is not compared here.
+
 Every difference is declared below with its (kit, core) outcome and asserted exactly, so a
 change on either side fails here. While any gap stands the kit keeps ``kit/synthetic.py`` (its
 callers need its shapes: ``GenDoc`` bytes and a ``kit.recon.Witness``); the owner frames the
@@ -39,8 +44,11 @@ def _cents(d: Decimal) -> int:
 
 
 def _core_invoices() -> list[tuple[str, object]]:
-    """The core's RO invoices over the quarter that the kit's generator can also express: in RON,
-    with a RO partner, not credit notes (the kit draws none)."""
+    """The core's invoices over the quarter that both books post: 360 of its 390. Excluded, each
+    for its own reason: the 20 credit notes, because the kit never draws one (gap
+    ``month_shape``); the 10 foreign purchases in EUR, because the kit does draw them but its book
+    refuses to post them and routes them to a person, while the core's posts them (gap
+    ``foreign_purchase_posting``, decided by D5)."""
     out = []
     for key, firm in core.synthetic.FIRMS.items():
         for inv in realistic(firm, PERIODS, seed=SEED).invoices():
@@ -49,13 +57,12 @@ def _core_invoices() -> list[tuple[str, object]]:
     return out
 
 
-def _kit_posting(key: str, inv) -> dict[str, int]:
-    """The core's invoice as a kit ``GenDoc``, posted by the kit's simulated book: account →
-    debit minus credit, in cents."""
+def _kit_doc(inv, kind: str) -> kit.GenDoc:
+    """The core's invoice as a kit ``GenDoc`` of *kind*."""
     p = inv.partner
-    gd = kit.GenDoc(
+    return kit.GenDoc(
         inv.ref,
-        "purchase" if inv.side == "in" else "sale",
+        kind,
         "ro_efactura_ubl",
         inv.number,
         inv.issued,
@@ -64,6 +71,12 @@ def _kit_posting(key: str, inv) -> dict[str, int]:
         Decimal(inv.vat) / 100,
         b"",
     )
+
+
+def _kit_posting(key: str, inv) -> dict[str, int]:
+    """The core's invoice as a kit ``GenDoc``, posted by the kit's simulated book: account →
+    debit minus credit, in cents."""
+    gd = _kit_doc(inv, "purchase" if inv.side == "in" else "sale")
     witness, _ = kit.simulated_book(kit.FIRMS[key], inv.period, [gd])
     net: dict[str, int] = defaultdict(int)
     for ln in witness.lines:
@@ -208,7 +221,9 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
         ["Bon", "ExpenseReport", "Invoice", "Payroll", "Statement"],
     ),
     # The kit writes its invoices with no VAT breakdown (cac:TaxSubtotal): its reader accepts
-    # them, the core's refuses every one (the D9 rule), for one of two reasons.
+    # them, the core's refuses every one, for one of two reasons: the 81 with VAT because the
+    # (absent) subtotals do not sum to TaxAmount, the 18 with zero VAT because no subtotal
+    # matches the line categories. D9 decides this gap; it is not a separate decision.
     "kit_invoices_without_vat_breakdown": (
         ["accepted"],
         [
@@ -221,6 +236,17 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     "cost_and_revenue_accounts": (
         ["628", "704"],
         ["604", "611", "612", "624", "626", "628", "704", "707"],
+    ),
+    # The core's foreign purchases in EUR over the quarter (7 for abroad, 3 for neplatitor): the
+    # kit's book refuses every one and routes it to a person (``to_person``), posting nothing; the
+    # core's posts each, as (debit, credit) synthetic accounts. D5 decides this gap; it is not a
+    # separate decision.
+    "foreign_purchase_posting": (
+        {"abroad": (7, ["to a person"]), "neplatitor": (3, ["to a person"])},
+        {
+            "abroad": (7, [("4426", "4427"), ("628", "401")]),
+            "neplatitor": (3, [("628", "401")]),
+        },
     ),
     # The partner accounts: the kit posts to the synthetic 401 / 4111, the core to analytics.
     "partner_accounts": (
@@ -310,6 +336,29 @@ def _observed(gap: str) -> tuple[object, object]:
                 n += 1
         assert n == 99  # every invoice the kit draws over the quarter, its parts included
         return sorted(kit_seen), sorted(core_seen)
+    if gap == "foreign_purchase_posting":
+        kit_seen: dict[str, tuple[int, set]] = {}
+        core_seen: dict[str, tuple[int, set]] = {}
+        for key, firm in core.synthetic.FIRMS.items():
+            for inv in realistic(firm, PERIODS, seed=SEED).invoices():
+                if inv.is_credit or not (inv.foreign or inv.currency != "RON"):
+                    continue
+                assert inv.side == "in" and inv.foreign and inv.currency == "EUR"
+                gd = _kit_doc(inv, "foreign_purchase")
+                witness, _ = kit.simulated_book(kit.FIRMS[key], inv.period, [gd])
+                routed = "to a person" if kit.to_person(gd) and not witness.lines else "booked"
+                n, seen = kit_seen.get(key, (0, set()))
+                kit_seen[key] = (n + 1, seen | {routed})
+                pairs = {
+                    (e.debit.split(".")[0], e.credit.split(".")[0])
+                    for e in core.synthetic.Book(firm).post(inv).entries
+                }
+                n, seen = core_seen.get(key, (0, set()))
+                core_seen[key] = (n + 1, seen | pairs)
+        return (
+            {k: (n, sorted(s)) for k, (n, s) in kit_seen.items()},
+            {k: (n, sorted(s)) for k, (n, s) in core_seen.items()},
+        )
     invoices = _core_invoices()
     if gap == "cost_and_revenue_accounts":
         kit_rest, core_rest = set(), set()
