@@ -8,8 +8,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: false   # uv sync checks out the pinned core: its catalog is read there (WP-21)
       - run: uv sync
       - run: uv run ruff check . && uv run ruff format --check .
+      - name: The pinned core's catalog (POARTA_CATALOG_DIR, WP-21)
+        run: |
+          commit=$(uv run python -c "import kit.calendar as k; print(k.pinned_commit())")
+          core="$RUNNER_TEMP/poarta-contabila"
+          git init -q "$core"
+          git -C "$core" fetch -q --depth 1 https://github.com/lucapaguroidea-ops/PoartaContabila "$commit"
+          git -C "$core" checkout -q FETCH_HEAD
+          test "$(git -C "$core" rev-parse HEAD)" = "$commit"
+          echo "POARTA_CATALOG_DIR=$core/catalog" >> "$GITHUB_ENV"
       - run: uv run pytest -q

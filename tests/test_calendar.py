@@ -3,9 +3,12 @@ issue; the Dispatcher asks the pinned core's calendar and records every owed fil
 refused or later, with its reason; a refusal or a register that is not fresh holds the client's
 calendar for a person, with the reasons (P10).
 
-No legal value is written here. The real core catalog is read at the pinned commit from the
-checkout ``uv sync`` made of it; it pins no non-working year and leaves the freshness window
-unset, so every owed filing is refused and the calendar is held. The dated path runs on that
+No legal value is written here. The real core catalog is read at the pinned commit from
+``POARTA_CATALOG_DIR``, the same variable the kit reads in deployment (CI fetches PoartaContabila
+at the pinned commit and sets it); its checkout must be at exactly the pin, or the tests fail.
+Only when the variable is unset do the tests look, for local convenience, for a checkout
+``uv sync`` left in uv's cache. The catalog pins no non-working year and leaves the freshness
+window unset, so every owed filing is refused and the calendar is held. The dated path runs on that
 catalog with an **invented** window and **invented** non-working years (labelled synthetic,
 tests only), as PoartaContabila's own calendar tests do. Firms are the core's synthetic ones.
 """
@@ -14,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
@@ -47,13 +51,36 @@ FREQ = {"tva_period": "lunar", "d100_period": "trimestrial", "d112_period": "lun
 
 
 def _pinned_checkout() -> Path:
-    """The core's catalog at the pinned commit: the git checkout ``uv sync`` made of the pin."""
+    """The core's catalog at the pinned commit: ``POARTA_CATALOG_DIR``, else a uv-cache checkout.
+
+    A set variable is the only source: its checkout's HEAD must be the pin, or the tests fail.
+    """
     commit = kcal.pinned_commit()
-    cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, text=True, check=True)
-    for path in sorted(Path(cache.stdout.strip()).glob(f"git-v0/checkouts/*/{commit[:7]}")):
+    where = os.environ.get(kcal.CATALOG_ENV)
+    if where:
+        path = Path(where)
+        head = kcal._head(path)
+        if head != commit:
+            pytest.fail(
+                f"{kcal.CATALOG_ENV}={where} is not the pinned core's catalog: its checkout is at"
+                f" {(head or 'no git commit')[:7]}, the pin is {commit[:7]}"
+            )
+        if not path.is_dir():
+            pytest.fail(f"{kcal.CATALOG_ENV}={where} is not a directory")
+        return path
+    try:
+        cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, text=True, check=True)
+        found = sorted(Path(cache.stdout.strip()).glob(f"git-v0/checkouts/*/{commit[:7]}"))
+    except (OSError, subprocess.SubprocessError):
+        found = []
+    for path in found:
         if kcal._head(path) == commit and (path / "catalog").is_dir():
             return path / "catalog"
-    pytest.fail(f"no checkout of the pinned core {commit[:7]} in uv's cache: run uv sync")
+    pytest.fail(
+        f"no catalog of the pinned core {commit[:7]}: set {kcal.CATALOG_ENV} to the catalog/ of a"
+        f" PoartaContabila checkout at {commit} (git fetch --depth 1 origin {commit};"
+        " git checkout FETCH_HEAD)"
+    )
 
 
 @pytest.fixture(scope="module")
