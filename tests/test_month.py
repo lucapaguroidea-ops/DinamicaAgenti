@@ -44,16 +44,16 @@ def pinned(cat: Catalog) -> Catalog:
 class Month:
     """One client-month: its dossier, a fake Paperclip, and the person and SAGA answering."""
 
-    def __init__(self, cat, tmp_path, books_first=True):
-        self.cat, self.pc = cat, Fake()
-        self.d = open_dossier(tmp_path / "dossiers", CUI)
+    def __init__(self, cat, tmp_path, books_first=True, firm=FIRM):
+        self.cat, self.pc, self.firm = cat, Fake(), firm
+        self.d = open_dossier(tmp_path / "dossiers", firm.cui)
         self.d.mark_test_firm()
-        self.d.set_codit(P, FIRM.axes)
+        self.d.set_codit(P, firm.axes)
         labels = ("batch", "job", "recon", "close", "hank")
         self.co = Company(
             {
                 "company": "co",
-                f"project:{CUI}": "prj",
+                f"project:{firm.cui}": "prj",
                 "agent:dispatcher": "agt-d",
                 "agent:reader": "agt-r",
                 "agent:classifier": "agt-c",
@@ -62,7 +62,7 @@ class Month:
             },
             "user-acc",
         )
-        self.docs = month(FIRM, P)
+        self.docs = month(firm, P)
         if books_first:
             self.d.put_export("rj_before", [P], {"covered": [P]})
 
@@ -104,7 +104,7 @@ class Month:
                 "kit",
                 {"packaged": True, "imported": True, "status": "wait_validare"},
             )
-        w, bal = simulated_book(FIRM, P, booked(books_docs or self.docs))
+        w, bal = simulated_book(self.firm, P, booked(books_docs or self.docs))
         self.d.put_export("rj_after", [P], {**w.model_dump(), "balances": bal})
         return {x.number: x.saga_key for x in w.docs}
 
@@ -376,3 +376,67 @@ def test_a_read_of_a_scan_becomes_the_document(cat, tmp_path):
         pinned(cat), ROOT, m2.d, "read-document", i2, runner=fake_runtime({"read.json": off})
     )
     assert unconfirmed.fields == {"read_runs": 1, "read_confirmed": False}
+
+
+# ----- the month's Reconcile over acked Jobs (POST) -----
+
+
+def acked_month(m: Month) -> list[str]:
+    """Every e-invoice of the month approved, imported and acked with its bound articol."""
+    jobs = m.take_in()
+    for j in jobs:
+        assert m.run(j).ended == "ask:v3_approve"
+        m.answer(j, decision=["approve"])
+        m.run(j)
+    keys = m.saga_stand_in(jobs)
+    for j in jobs:
+        assert m.run(j).ended == "ask:wait_validare"
+        m.answer(j, validated=["true"], saga_doc_key=keys[m.d.facts(j)["_doc"]["number"]])
+        assert m.run(j).ended == "done:acked"
+        assert m.d.facts(j)["bound_articol"]
+    return jobs
+
+
+def spy_post(monkeypatch) -> list[str]:
+    import kit.steps
+
+    seen: list[str] = []
+    real = kit.steps.post_check
+
+    def spy(profile, *args):
+        seen.append(getattr(profile, "id", None))
+        return real(profile, *args)
+
+    monkeypatch.setattr(kit.steps, "post_check", spy)
+    return seen
+
+
+@pytest.mark.parametrize("firm_key", ["platitor", "incasare"])
+def test_the_months_reconcile_checks_acked_jobs_on_the_close_kinds_post_profile(
+    cat, tmp_path, monkeypatch, firm_key
+):
+    firm = FIRMS[firm_key]
+    m = Month(cat, tmp_path, firm=firm)
+    jobs = acked_month(m)
+    seen = spy_post(monkeypatch)
+    recon = f"recon:{firm.cui}:{P}"
+    t = m.run(recon)
+    assert t.steps[0] == "kit:recheck_window" and not t.ended.startswith("hold")
+    assert m.d.facts(recon)["checked"] is True
+    kinds = {"platitor": "close_standard", "incasare": "close_tva_incasare"}
+    expected = cat.get("CloseKind", kinds[firm_key]).recon_profile
+    assert seen == [expected] * len(jobs)
+
+
+@pytest.mark.law("P10")
+def test_no_close_kind_for_the_period_holds_the_reconcile_never_guesses_a_profile(
+    cat, tmp_path, monkeypatch
+):
+    m = Month(cat, tmp_path)
+    acked_month(m)
+    seen = spy_post(monkeypatch)
+    rows = {k: dict(v) for k, v in cat.rows.items()}
+    rows["CloseKind"] = {}
+    t = m.run(f"recon:{CUI}:{P}", cat=Catalog(rows=rows))
+    assert t.ended.startswith("hold") and "close kind" in t.ended
+    assert seen == []
