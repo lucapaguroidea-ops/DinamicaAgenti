@@ -37,18 +37,22 @@ Conventions (checked by `kit hank check` and `tests/test_hanks.py`):
   the role's pinned model's, with the run directory; `kit verify --dossiers` needs
   `--operator` and stores the file as that operator's, never as a model's. A key holds one
   answer: the same answer from the same source again is a no-op, any other is refused.
-- a cache hit is all or nothing: every role of the hank has a stored answer, all from one
-  model run. On a partial hit the run answers every role (an explanation reads its own run's
+- a cache hit is all or nothing: every role of the hank has a stored answer, and either all
+  of them come from one model run, or all are an operator's on a test firm. On a partial hit the run answers every role (an explanation reads its own run's
   verdict); a run's answers are stored only when every role's passed, and only for the roles
   with no stored answer.
-- an operator's answer never stands in for a model run on a real client's dossier: when a
-  cached answer is an operator's (or has no recorded source), `kit hank-run` runs nothing,
-  writes no fact from it and refuses the hank the way an unpinned role does (P8): the hank's
-  refusal facts go to the work issue with the reason (`_hank_held`), and its route goes on
-  the cautious way (a read to the strong tier, a doubtful verdict to a person's card, a
-  review contested, no close suggestion). Only on a dossier marked a test firm
-  (`kit dossier mark-test-firm`) is it used, for rigs and development loops with no live
-  model, and the work issue's facts say whose answer it was (`_answer_sources`).
+- a cached answer with no recorded source is refused on every dossier, a test firm's
+  included; an operator's answer is used only on a dossier marked a test firm (`kit dossier
+  mark-test-firm`), for rigs and development loops with no live model, and is refused on a
+  real client's. On a refusal `kit hank-run` runs nothing, writes no fact from that answer
+  and refuses the hank the way an unpinned role does (P8): the hank's refusal facts go to the
+  work issue with the reason (`_hank_held`), and its route goes on the cautious way (a read to
+  the strong tier, a doubtful verdict to a person's card, a review contested, no close
+  suggestion).
+- the work issue's facts always say whose answers they were read from (`_answer_sources`, per
+  role: the model's pin and the run directory, or the operator), also when only some roles of
+  a run passed and nothing was stored. `kit hank-run` answers only the hand-off still pending:
+  a replay after its facts were written runs nothing and writes nothing (P9).
 
 The budgets are first values (dollars and seconds per codon), to be set per role in Paperclip
 (WP-15).

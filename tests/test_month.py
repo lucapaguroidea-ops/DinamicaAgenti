@@ -14,7 +14,7 @@ import pytest
 
 from kit.catalog import Catalog, load_catalog
 from kit.cli import main
-from kit.dispatch import Company, dispatch, ensure_issue, finish_hank, refuse_held
+from kit.dispatch import Company, answer_hank, dispatch, ensure_issue, finish_hank, refuse_held
 from kit.hankrun import prepare, run_hank
 from kit.hanks import DOUBTFUL, HankHeld, card_hash, input_hash
 from kit.steps import intake
@@ -295,7 +295,7 @@ def test_a_pinned_judge_runs_on_its_own_issue_and_its_verified_answer_comes_back
 
     again = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({}))
     assert not again.ran and again.fields["verdict"]["risk"] == "low"  # cached: nothing ran
-    assert "_answer_sources" not in again.fields
+    assert again.fields["_answer_sources"] == run.fields["_answer_sources"]  # the run it read
     for codon, role_id in (("judge", "judge_document"), ("explain", "explain_approve")):
         role = pcat.get("ModelRole", role_id)
         row = m.d.model_answer(role_id, input_hash(rt.seen["input"]), card_hash(ROOT, role))
@@ -303,6 +303,11 @@ def test_a_pinned_judge_runs_on_its_own_issue_and_its_verified_answer_comes_back
         assert row.model == role.model  # the pin it ran with, read from the catalog
         assert row.run and (m.d.folder / row.run).is_dir()
         assert again.sources[codon] == run.sources[codon] == {"source": "model", "by": role.model}
+        assert again.fields["_answer_sources"][role_id] == {
+            "source": "model",
+            "model": role.model,
+            "run": row.run,
+        }
 
 
 @pytest.mark.law("P8")
@@ -504,9 +509,12 @@ def test_a_held_read_moves_on_to_the_strong_tier(cat, tmp_path, cached):
     assert m.pc.issues[hid]["status"] == "todo" and m.pc.issues[hid]["assigneeAgentId"] == "agt-r"
     rt = fake_runtime({"read.json": READ})
     run = run_hank(pcat, ROOT, m.d, "read-document", issue, runner=rt, tier="strong")
-    assert run.ran and run.fields["read_confirmed"] and "_answer_sources" not in run.fields
+    assert run.ran and run.fields["read_confirmed"]
     strong = pcat.get("ModelRole", "reader_document_strong")
     assert run.sources == {"read": {"source": "model", "by": strong.model}}
+    assert run.fields["_answer_sources"] == {
+        strong.id: {"source": "model", "model": strong.model, "run": run.runs["read"]}
+    }  # the strong run's, never the held answer's
     assert m.d.model_answer(*key).source == (
         "operator" if cached == "operator_on_a_real_dossier" else None
     )  # the held row stands as it was; the strong run is its own key
@@ -576,6 +584,30 @@ def test_a_run_stores_its_answers_together_or_not_at_all(cat, tmp_path):
     assert not third.ran and third.fields["verdict"] == verdict
 
 
+@pytest.mark.law("P12")
+def test_a_partly_passing_run_names_the_model_and_run_behind_its_facts(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    job = m.take_in()[0]
+    m.run(job, pcat)
+    verdict = {"accounts_ok": True, "risk": "low", "needs_human": False}
+    run = run_hank(
+        pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({"verdict.json": verdict})
+    )
+    assert run.verified["judge"].ok and not run.verified["explain"].ok
+    assert run.fields["verdict"] == verdict  # the passing verdict is a fact, its answer unstored
+    judge = pcat.get("ModelRole", "judge_document")
+    sources = run.fields["_answer_sources"]
+    assert list(sources) == [judge.id]  # the failed explanation gives no fact, so no source
+    assert sources[judge.id]["source"] == "model" and sources[judge.id]["model"] == judge.model
+    where = sources[judge.id]["run"]
+    assert (m.d.folder / where / "out").is_dir()
+    second = run_hank(
+        pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({"verdict.json": verdict})
+    )
+    assert second.fields["_answer_sources"][judge.id]["run"] == f"{where}-2"  # its own run
+
+
 @pytest.mark.law("P8")
 @pytest.mark.law("P12")
 def test_on_a_test_firm_an_operators_read_is_used_and_says_whose_it_is(cat, tmp_path):
@@ -588,6 +620,52 @@ def test_on_a_test_firm_an_operators_read_is_used_and_says_whose_it_is(cat, tmp_
     assert run.fields["_answer_sources"] == {
         "reader_document": {"source": "operator", "by": "op-ana"}
     }
+
+
+def facts_rows(m: Month, issue: str, prefix: str) -> list[str]:
+    rows = m.d.db.execute("SELECT key FROM issue_facts WHERE issue = ?", (issue,)).fetchall()
+    return [k for (k,) in rows if k.startswith(prefix)]
+
+
+@pytest.mark.law("P9")
+@pytest.mark.parametrize("read", ["confirmed", "not_confirmed"])
+def test_a_replayed_hank_run_writes_its_facts_once(cat, tmp_path, read):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    issue = scan_issue(m)
+    hank = f"hank:read-document:{issue}"
+    assert m.run(issue, pcat).ended == f"wait:{hank}"
+    body = READ if read == "confirmed" else {"doc_type": "invoice"}  # the second fails verify
+    first = answer_hank(
+        pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, fake_runtime({"read.json": body})
+    )
+    assert first is not None and first.ran
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs) is None
+    assert facts_rows(m, issue, "hank:read-document:") == [first.key]
+    f = m.d.facts(issue)
+    assert f["read_runs"] == 1 and f["_hank"] is None
+    assert f["read_confirmed"] is (read == "confirmed")
+    assert m.pc.issues[m.d.paperclip_id(hank)]["status"] == "done"
+    assert m.pc.issues[m.d.paperclip_id(issue)]["blockedByIssueIds"] == []
+
+
+@pytest.mark.law("P9")
+@pytest.mark.law("P8")
+def test_a_replayed_held_hank_run_writes_its_refusal_once(cat, tmp_path):
+    m = Month(cat, tmp_path, test_firm=False)
+    pcat = pinned(cat)
+    issue = scan_issue(m)
+    assert m.run(issue, pcat).ended == f"wait:hank:read-document:{issue}"
+    role = pcat.get("ModelRole", "reader_document")
+    key = (role.id, input_hash(SCAN_INPUT), card_hash(ROOT, role))
+    m.d.put_model_answer(*key, READ, operator="op-ana")
+    with pytest.raises(HankHeld):
+        answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs)
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs) is None
+    assert len(facts_rows(m, issue, "held:read-document:")) == 1
+    assert not facts_rows(m, issue, "hank:")
+    f = m.d.facts(issue)
+    assert f["read_runs"] == 1 and f["read_confirmed"] is False and f["_hank"] is None
 
 
 # ----- the month's Reconcile over acked Jobs (POST) -----

@@ -25,7 +25,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kit.cards import CardError, answer_from_result, card
 from kit.catalog import Catalog
@@ -35,6 +35,9 @@ from kit.questions import answer_question, question_hash
 from kit.route import _ROUTES, Step
 from kit.steps import APPLY, CONTEXT, EXECUTORS, LIVE_CONTEXT, Executor, StepError, derive
 from kit.store import Dossier, StoreError
+
+if TYPE_CHECKING:
+    from kit.hankrun import HankRun
 
 MAX_STEPS = 12
 DONE_CANCELLED = ("rejected", "failed", "not_emitted", "refused")
@@ -273,11 +276,15 @@ def finish_hank(
     and the work issue goes back to the Dispatcher (Paperclip also wakes it when its blocker is
     done)."""
     _write(d, pc, co, issue, key, source, {**fields, "_hank": None})
+    done = "Verified by kit verify; facts written."
+    if source == "refusal":
+        done = "Refused: the cautious facts are written; a person is asked on the route."
+    _hank_done(d, pc, co, issue, hank, done)
+
+
+def _hank_done(d: Dossier, pc: Client, co: Company, issue: str, hank: str, done: str) -> None:
     hid = d.paperclip_id(hank_issue(hank, issue))
     if hid:
-        done = "Verified by kit verify; facts written."
-        if source == "refusal":
-            done = "Refused: the cautious facts are written; a person is asked on the route."
         _patch(pc, hid, status="done", comment=done)
     _patch(
         pc,
@@ -287,6 +294,47 @@ def finish_hank(
         assigneeAgentId=co.id("agent:dispatcher"),
         assigneeUserId=None,
     )
+
+
+def answer_hank(
+    cat: Catalog,
+    repo: Path,
+    d: Dossier,
+    pc: Client,
+    co: Company,
+    hank: str,
+    issue: str,
+    runner: Callable[[list[str], Path], int] | None = None,
+) -> HankRun | None:
+    """``kit hank-run`` on the hank handed off for ``issue``: run it (``run_hank``) and write its
+    facts (``finish_hank``), or its refusal's (``HankRefused``, ``HankHeld``: written, then
+    raised). It answers only the hand-off still pending (``_hank`` names this hank's issue): a
+    replay after the facts were written runs nothing and writes nothing (P9), so a read is
+    counted once; it only closes the hank issue again. Returns the run, or None on a replay."""
+    from kit.hankrun import run_hank, subprocess_runner
+
+    child = hank_issue(hank, issue)
+    pending = d.facts(issue).get("_hank")
+    if not pending or pending.get("issue") != child:
+        hid = d.paperclip_id(child)
+        if not pending:
+            _hank_done(d, pc, co, issue, hank, "Already answered: its facts are written.")
+        elif hid:  # another hank is pending on the work issue: it stays blocked by that one
+            _patch(pc, hid, status="done", comment="Already answered: its facts are written.")
+        return None
+    tier = pending.get("tier", "everyday")
+    try:
+        run = run_hank(cat, repo, d, hank, issue, runner=runner or subprocess_runner, tier=tier)
+    except HankRefused as refused:
+        facts = REFUSALS[hank](d.facts(issue))
+        key = f"refusal:{hank}:{refused.roles}"
+        finish_hank(d, pc, co, issue, hank, key, facts, source="refusal")
+        raise
+    except HankHeld as held:
+        refuse_held(d, pc, co, issue, hank, held)
+        raise
+    finish_hank(d, pc, co, issue, hank, run.key, run.fields)
+    return run
 
 
 def refuse_held(d: Dossier, pc: Client, co: Company, issue: str, hank: str, held: HankHeld) -> None:
