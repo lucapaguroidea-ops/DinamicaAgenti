@@ -12,7 +12,9 @@ A question kind is a catalog row: its actor and its answer shape, written in a s
 the SAGA agent's by a person), validates the answer against the shape (P10), runs the kind's
 check against the question it answers, and appends the outcome to the client's answer log (P12):
 ``accepted``, or ``asked_again`` with the reason — the same question is asked again with an
-``error`` field, and the node that asked it never moves on a refused answer.
+``error`` field, and the node that asked it never moves on a refused answer. An accepted answer
+is kept in the kit's stored form (``canonical``): a ``cui`` as its digits, whatever spelling the
+grammar accepted, so the log, the kind's check and what applies the answer all see one value.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import Any, Literal
 from kit.catalog import Catalog
 from kit.sorting import Pack, SplitError, split
 from kit.store import Dossier
-from kit.types import cui_is_valid, is_period
+from kit.types import cui_is_valid, is_period, normalize_cui
 
 _ATOMS = {
     "bool": lambda v: isinstance(v, bool),
@@ -131,6 +133,28 @@ def _record(value: Any, fields: dict[str, T], path: str) -> list[str]:
         sub = f"{path}.{name}" if path else name
         errors += validate(value.get(name), ft, sub)
     return errors
+
+
+def canonical(value: Any, expr: str | T) -> Any:
+    """``value``, which fits ``expr``, in the kit's stored form: each ``cui`` as its digits
+    (``normalize_cui``, the form ``cui_is_valid`` checks), everything else as given. It changes
+    no answer's acceptance, only how an accepted one is kept."""
+    t = parse_type(expr) if isinstance(expr, str) else expr
+    if value is None:
+        return None
+    if t.kind == "cui":
+        return normalize_cui(value)
+    if t.kind == "list":
+        return [canonical(v, t.item) for v in value]
+    if t.kind == "record":
+        fields = dict(t.fields)
+        return {k: canonical(v, fields[k]) for k, v in value.items()}
+    return value
+
+
+def canonical_record(value: dict, shape: dict[str, str]) -> dict:
+    """``canonical`` over a closed record shape (a catalog row's ``answer``) it already fits."""
+    return {k: canonical(v, shape[k]) for k, v in value.items()}
 
 
 def question_hash(question: dict) -> str:
@@ -280,6 +304,7 @@ class Outcome:
     error: str | None
     question_hash: str
     question: dict  # the question as asked next: with ``error`` when asked again
+    answer: Any = None  # accepted: the answer as stored (``canonical``); else as given
 
 
 def check_record(value: Any, shape: dict[str, str]) -> list[str]:
@@ -305,11 +330,13 @@ def answer_question(
     qhash = question_hash(question)
     errors = check_record(answer, row.answer)
     error = "; ".join(errors) if errors else None
+    if error is None:
+        answer = canonical_record(answer, row.answer)
     if error is None and kind in CHECKS:
         error = CHECKS[kind](cat, question, answer)
     proposed = question.get("proposed")
     if error is not None:
         dossier.record_answer(issue, kind, qhash, answer, proposed, "asked_again", operator)
-        return Outcome("asked_again", error, qhash, {**question, "error": error})
+        return Outcome("asked_again", error, qhash, {**question, "error": error}, answer)
     dossier.record_answer(issue, kind, qhash, answer, proposed, "accepted", operator)
-    return Outcome("accepted", None, qhash, question)
+    return Outcome("accepted", None, qhash, question, answer)

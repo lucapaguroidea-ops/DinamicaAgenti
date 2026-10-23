@@ -16,7 +16,9 @@ interrupt that asks and asks again), ``answers`` (the question's hash and the an
 answer models of twelve kinds (``reconcile``, ``ingest``, ``close``, ``triage``) and their checks,
 which are closures inside graph nodes; ``filing_receipt`` is an upload (``operator_api``), with no
 answer model. Those are compared below as the core's namesakes outside the core, labelled so,
-the way the ``period.py`` step compared ``close_kind``.
+the way the ``period.py`` step compared ``close_kind``. Replacement is not possible until the core
+exports a questions module (``answer_question`` / ``check_record`` / ``parse_type`` /
+``question_hash`` or equivalents); until then this step's comparison is of pieces, not of a module.
 
 **The corpus** is invented here, since neither side generates questions: for each of the fifteen
 kinds both catalogs name but ``filing_receipt`` (no answer model in the core: gap
@@ -34,7 +36,9 @@ accepted (the kit's ``check_record`` on its row, the core's answer model); the t
 (accepted or asked again; the reason is prose and is not compared); the question's hash; the
 answer log's outcomes; what a ``v4_codit`` answer may edit and seed. Not compared: the reasons'
 wording (prose on both sides), the Paperclip card (the kit's only), and the checks the core keeps
-outside the core (closures in graph nodes, and ``triage.check_split``).
+outside the core (closures in graph nodes, and ``triage.check_split``), so none of the kit's checks
+that stand against them is compared: ``_v2``'s material-month refusal, ``_ambiguous``,
+``_need_export``, ``_validare``, ``_v4``'s accept / skip, and ``_split`` against ``check_split``.
 
 **What agrees.** Overall: the actor of all 15 shared kinds; where 14 are asked; 25 of 29 answer
 field positions (name, type and options); 4 of 5 enum fields' options, in order; 931 of 1021
@@ -47,10 +51,11 @@ Sorting's questions (``kit/sorting.py`` and the catalog's split question), answe
 ``answer_question`` by ``kit/dispatch.py`` and ``kit/scenario.py``; ``kit/cards.py`` turns any
 card into an answer, so on those kinds any answer is live. Of the compared answers, the twelve
 live kinds' (``filing_receipt`` is live but not compared) agree on 825 of 885 (103 accepted, 722
-refused). ``explained_rule`` and ``control_disposition`` have no live kit caller (``kit/cards.py``
-would render them; nothing asks them), and they are the only two kinds whose core check is in the
-core: so no in-core check comparison is on a live path, and their answer shapes are compared off
-the live paths.
+refused). ``explained_rule`` and ``control_disposition`` have no asker: no route, question or step
+of the kit asks them (``kit/cards.py`` would render them; ``kit answer --kind`` can answer them
+through the CLI, while ``APPLY`` has no entry for either), and they are the only two kinds whose
+core check is in the core: so no in-core check comparison is on a live path, and their answer
+shapes are compared off the live paths.
 
 **Vacuity.** No agreement is one-sided: every compared kind has an answer both accept and one both
 refuse; each in-core check has a case both accept and one both ask again; the actors include the

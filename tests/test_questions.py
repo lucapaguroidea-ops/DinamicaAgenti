@@ -314,3 +314,38 @@ def test_decont_split_reuses_sortings_check(cat, d):
     bad = {"parts": [{"part_hash": h("b"), "source_doc_id": "bon_fiscal", "kinds": ["jpeg"]}]}
     out = ask(cat, d, "decont_split", {"pack": container}, bad, issue="batch:b2")
     assert out.status == "asked_again" and "not a part of" in out.error
+
+
+@pytest.mark.parametrize("spelled", ["RO73645193", "ro73645193", " 73645193 ", "RO 73645193"])
+def test_an_accepted_cui_is_kept_as_its_digits(cat, d, spelled):
+    container = {
+        "client_cui": CLIENT,
+        "period": "2026-09",
+        "source_hash": h("decont"),
+        "source_doc_id": "decont_cheltuieli",
+        "kinds": ["xlsx"],
+        "identity_ok": True,
+    }
+    part = {"part_hash": h("f"), "source_doc_id": "ro_efactura_ubl", "kinds": ["ubl_spv"]}
+    given = {"parts": [{**part, "counterparty_cui": spelled}]}
+    out = ask(cat, d, "decont_split", {"pack": container}, given, issue="batch:b1")
+    assert out.status == "accepted"
+    kept = {"parts": [{**part, "counterparty_cui": "73645193"}]}
+    assert out.answer == kept and d.answers("batch:b1")[-1]["answer"] == kept
+    assert given["parts"][0]["counterparty_cui"] == spelled  # the caller's answer is not mutated
+
+
+def test_a_cuis_spelling_changes_its_stored_form_never_its_acceptance(cat, d):
+    container = {
+        "client_cui": CLIENT,
+        "period": "2026-09",
+        "source_hash": h("decont"),
+        "source_doc_id": "decont_cheltuieli",
+        "kinds": ["xlsx"],
+        "identity_ok": True,
+    }
+    part = {"part_hash": h("f"), "source_doc_id": "ro_efactura_ubl", "kinds": ["ubl_spv"]}
+    for i, bad in enumerate(["041526372", "RO73645190", "RO", " "]):
+        answer = {"parts": [{**part, "counterparty_cui": bad}]}
+        out = ask(cat, d, "decont_split", {"pack": container}, answer, issue=f"batch:r{i}")
+        assert out.status == "asked_again" and out.answer == answer

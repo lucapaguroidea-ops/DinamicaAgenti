@@ -353,7 +353,7 @@ def _take_answer(cat, d, issue, pid, pc, co, pending: dict, tick: Tick) -> bool:
         return False
     effect = APPLY.get(kind)
     try:
-        fields = effect(cat, d, issue, d.facts(issue), question, answer) if effect else {}
+        fields = effect(cat, d, issue, d.facts(issue), question, out.answer) if effect else {}
     except (StepError, StoreError) as exc:
         d.add_facts(issue, f"answer:{pending['id']}", "answer", {"_card": None})
         _hold(pc, pid, co, tick, f"{kind} is answered but cannot apply: {exc}")
