@@ -36,6 +36,7 @@ class Partner:
     cui: str | None
     vat_id: str
     name: str
+    country: str | None = None  # BT-40 / BT-55; absent reads as RO (as the core reads it)
 
 
 FIRMS = {
@@ -118,7 +119,7 @@ CUSTOMERS = [
     Partner("10594636", "RO10594636", "CLIENT UNU SRL"),
     Partner("27182826", "RO27182826", "CLIENT DOI SRL"),
 ]
-FOREIGN = Partner(None, "DE999999999", "KUNDE EINS GMBH")  # an invented foreign VAT id
+FOREIGN = Partner(None, "DE999999999", "KUNDE EINS GMBH", "DE")  # an invented foreign VAT id
 
 
 @dataclass
@@ -148,8 +149,15 @@ class GenDoc:
 def _party(p: Partner | Firm) -> str:
     vat = p.vat_id if isinstance(p, Partner) else f"RO{p.cui}"
     legal = p.cui or ""
+    country = p.country if isinstance(p, Partner) else None
+    address = (
+        f"<cac:PostalAddress><cac:Country><cbc:IdentificationCode>{country}"
+        "</cbc:IdentificationCode></cac:Country></cac:PostalAddress>"
+        if country
+        else ""
+    )
     return (
-        f"<cac:Party><cac:PartyTaxScheme><cbc:CompanyID>{vat}</cbc:CompanyID>"
+        f"<cac:Party>{address}<cac:PartyTaxScheme><cbc:CompanyID>{vat}</cbc:CompanyID>"
         "<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>"
         f"<cac:PartyLegalEntity><cbc:RegistrationName>{p.name}</cbc:RegistrationName>"
         f"{f'<cbc:CompanyID>{legal}</cbc:CompanyID>' if legal else ''}"

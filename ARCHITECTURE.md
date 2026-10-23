@@ -79,8 +79,11 @@ The procedures are designed as state graphs. Each graph concept maps to one thin
 
 ### 4.1 Sorting — `batch:{id}`
 
-1. **Gate (kit).** Unknown file kind → Q `define_class`. A fiscal receipt whose CUI-on-document
-   is not settled → Q `bon_cui_unclear`. Then the emit gates.
+1. **Gate (kit).** An invoice the client is not on alone (neither its seller nor its buyer, or
+   both) is refused before any pack: no source, no pack, no Job; the batch ends `refused` with
+   the reason (P13). An invoice is from abroad when its counterparty has no RO CUI and a country
+   other than RO (an absent country is RO). Unknown file kind → Q `define_class`. A fiscal
+   receipt whose CUI-on-document is not settled → Q `bon_cui_unclear`. Then the emit gates.
 2. **Split (hank + Q).** A container (expense report) never becomes a Job. Once its identity and
    primary gates pass, hank `split-container` proposes parts; Q `decont_split` confirms them; each
    part is a child file through the emit gates. A part with its invoice XML is a UBL, never a PDF.

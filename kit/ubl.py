@@ -6,7 +6,7 @@ exactly one UBL ``Invoice`` or ``CreditNote``; every other member (the signature
 companion and is not read. ``parse_ubl`` reads the bindings and enforces the rules quoted in
 RESEARCH_LOG R3 (EN 16931 validation artefacts 1.3.16); anything missing, malformed or not tying
 is refused (P10). ``for_client`` places the document on the client's side: seller = outbound,
-buyer = inbound, neither = refused.
+buyer = inbound, neither (or both) = refused.
 
 Amounts are strings with two decimals (P10); arithmetic is Decimal, inside this module only.
 """
@@ -50,6 +50,7 @@ class Party(Closed):
     vat_id: str | None  # BT-31 / BT-48, with its country prefix
     legal_id: str | None  # BT-30 / BT-47
     cui: str | None  # a Romanian CUI that passes its check digit, else None
+    country: str | None  # BT-40 / BT-55, the postal address's country code, as written
 
 
 class Totals(Closed):
@@ -175,6 +176,7 @@ def _party(root: Element, role: str) -> Party:
         vat_id=vat_id,
         legal_id=legal_id,
         cui=cui,
+        country=_text(p, "cac:PostalAddress/cac:Country/cbc:IdentificationCode"),
     )
 
 

@@ -5,7 +5,9 @@ The package step is WP-10's (the SAGA XML renderer, waiting on R4); where a test
 past it, a stand-in marks it packaged and imported, as SAGA would, and says so."""
 
 import json
+import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,15 @@ from kit.hankrun import run_hank
 from kit.hanks import DOUBTFUL
 from kit.steps import intake
 from kit.store import open_dossier
-from kit.synthetic import FIRMS, booked, month, simulated_book
+from kit.synthetic import (
+    FIRMS,
+    SUPPLIERS,
+    booked,
+    month,
+    simulated_book,
+    spv_zip,
+    ubl_invoice,
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 from fake_paperclip import Fake  # noqa: E402
@@ -440,3 +450,170 @@ def test_no_close_kind_for_the_period_holds_the_reconcile_never_guesses_a_profil
     t = m.run(f"recon:{CUI}:{P}", cat=Catalog(rows=rows))
     assert t.ended.startswith("hold") and "close kind" in t.ended
     assert seen == []
+
+
+# ----- intake: whose invoice it is, and whether it is from abroad (P13) -----
+
+DE_SELLER = ("DE999999999", "LIEFERANT EINS GMBH")  # invented foreign VAT ids
+DE_BUYER = ("DE888888888", "KAEUFER ZWEI GMBH")
+RO_OTHER = (f"RO{SUPPLIERS[0].cui}", SUPPLIERS[0].name)  # another RO firm, a valid CUI
+PERSON = (None, "ION EXEMPLU")  # a person: no tax id
+
+
+def _party(tag: str, who: tuple[str | None, str], country: str | None) -> str:
+    vat, name = who
+    address = (
+        f"<cac:PostalAddress><cac:Country><cbc:IdentificationCode>{country}"
+        "</cbc:IdentificationCode></cac:Country></cac:PostalAddress>"
+        if country
+        else ""
+    )
+    tax = (
+        f"<cac:PartyTaxScheme><cbc:CompanyID>{vat}</cbc:CompanyID>"
+        "<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>"
+        if vat
+        else ""
+    )
+    legal = f"<cac:PartyLegalEntity><cbc:RegistrationName>{name}</cbc:RegistrationName>"
+    legal += f"<cbc:CompanyID>{vat[2:]}</cbc:CompanyID>" if vat and vat[:2] == "RO" else ""
+    legal += "</cac:PartyLegalEntity>"
+    return f"<cac:{tag}><cac:Party>{address}{tax}{legal}</cac:Party></cac:{tag}>"
+
+
+CLIENT = (f"RO{CUI}", FIRM.name)
+
+
+def invoice(seller, s_country, buyer, b_country, number="X-1") -> bytes:
+    """An invented invoice between any two parties, each with its country or none."""
+    xml = ubl_invoice(FIRM, SUPPLIERS[0], number, f"{P}-05", Decimal("100.00"), Decimal(0), "K")
+    xml = re.sub(
+        rb"<cac:AccountingSupplierParty>.*?</cac:AccountingSupplierParty>",
+        _party("AccountingSupplierParty", seller, s_country).encode(),
+        xml,
+        flags=re.S,
+    )
+    return re.sub(
+        rb"<cac:AccountingCustomerParty>.*?</cac:AccountingCustomerParty>",
+        _party("AccountingCustomerParty", buyer, b_country).encode(),
+        xml,
+        flags=re.S,
+    )
+
+
+def _rows(d) -> dict[str, int]:
+    tables = [r[0] for r in d.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+    tables = [t for t in tables if not t.startswith("sqlite_")]
+    return {t: d.db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+
+
+def _files(d) -> set[str]:
+    return {str(p.relative_to(d.folder)) for p in d.folder.rglob("*") if p.is_file()}
+
+
+@pytest.mark.law("P13")
+@pytest.mark.parametrize(
+    "seller, s_country, buyer, b_country",
+    [
+        (DE_SELLER, "DE", RO_OTHER, "RO"),
+        (DE_SELLER, "DE", DE_BUYER, "DE"),
+        (RO_OTHER, "RO", DE_BUYER, "DE"),
+        (RO_OTHER, None, PERSON, None),
+        (CLIENT, "RO", CLIENT, "RO"),
+    ],
+    ids=["de-to-ro-firm", "de-to-de", "ro-firm-to-de", "ro-firm-to-person", "client-both-sides"],
+)
+def test_an_invoice_the_client_is_not_on_alone_is_refused_no_pack_no_job(
+    cat, tmp_path, seller, s_country, buyer, b_country
+):
+    """Upload → intake → Dispatcher: an invoice the client is on neither side of (or on both)
+    ends its batch refused, with the reason; no pack, no Job, no source stored. What the dossier
+    keeps is the refusal fact and the batch issue's link, as for any refusal."""
+    m = Month(cat, tmp_path)
+    rows, files = _rows(m.d), _files(m.d)
+    for form, data in (
+        ("xml", invoice(seller, s_country, buyer, b_country)),
+        ("zip", spv_zip(invoice(seller, s_country, buyer, b_country), "4242")),
+    ):
+        batch, facts = intake(cat, m.d, P, f"other.{form}", data)
+        assert "_pack" not in facts and not facts["emit"]
+        assert "the client" in facts["refused"] and "P13" in facts["refused"]
+        tick = m.run(batch)
+        assert tick.steps == ["done:refused"], tick
+        pid = m.d.paperclip_id(batch)
+        assert m.pc.issues[pid]["status"] == "cancelled"
+        assert facts["refused"] in m.pc.comments[pid][-1]
+    assert m.d.jobs(P) == []
+    after = _rows(m.d)
+    assert {t: after[t] - rows[t] for t in after if after[t] != rows[t]} == {
+        "issue_facts": 2,
+        "paperclip_links": 2,
+    }
+    assert _files(m.d) == files  # no source written
+
+
+@pytest.mark.parametrize("country", [None, "RO"])
+@pytest.mark.parametrize("form", ["xml", "zip"])
+def test_a_sale_to_a_person_in_romania_is_a_ro_invoice_not_a_foreign_one(
+    cat, tmp_path, form, country
+):
+    """The client sells to a person (no tax id), the buyer's country absent (read as RO, as the
+    core reads it) or RO: an RO e-invoice that fails the identity gate (no counterparty CUI),
+    never a ``foreign_invoice`` Job."""
+    m = Month(cat, tmp_path)
+    xml = invoice(CLIENT, "RO", PERSON, country)
+    data = spv_zip(xml, "4243") if form == "zip" else xml
+    batch, facts = intake(cat, m.d, P, f"b2c.{form}", data)
+    assert facts["_pack"]["source_doc_id"] == "ro_efactura_ubl"
+    assert facts["_pack"]["our_role"] == "outbound" and not facts["emit"]
+    assert facts["failed"] == ["identity"]
+    assert m.run(batch).steps == ["done:not_emitted"]
+    assert m.d.jobs(P) == []
+
+
+@pytest.mark.parametrize("form", ["xml", "zip"])
+@pytest.mark.parametrize("side", ["outbound", "inbound"])
+def test_an_invoice_from_abroad_the_client_is_on_emits_a_foreign_invoice_job(
+    cat, tmp_path, side, form
+):
+    """A real invoice from abroad (the counterparty with no RO CUI and a country other than
+    RO), the client its seller or its buyer, as bare XML or in an SPV zip: a
+    ``foreign_invoice_xml`` whose kind is its XML, emitted as one ``foreign_invoice`` Job."""
+    m = Month(cat, tmp_path)
+    xml = (
+        invoice(CLIENT, "RO", DE_BUYER, "DE")
+        if side == "outbound"
+        else invoice(DE_SELLER, "DE", CLIENT, None)
+    )
+    data = spv_zip(xml, "4244") if form == "zip" else xml
+    batch, facts = intake(cat, m.d, P, f"abroad.{form}", data)
+    pack = facts["_pack"]
+    assert (pack["source_doc_id"], pack["kinds"], pack["our_role"]) == (
+        "foreign_invoice_xml",
+        ["xml"],
+        side,
+    )
+    assert pack["identity_ok"] and pack["counterparty_cui"] is None
+    assert facts["emit"], facts["failed"]
+    assert m.run(batch).steps == ["kit:emit", "done:emitted"]
+    (job,) = m.d.jobs(P)
+    assert (job.job_kind, job.source_doc_id, job.status) == (
+        "foreign_invoice",
+        "foreign_invoice_xml",
+        "ingested",
+    )
+
+
+def test_the_synthetic_months_invoices_from_abroad_are_read_as_from_abroad(cat, tmp_path):
+    """The kit's own month for a firm that trades abroad: its foreign sale and its EU service
+    carry the partner's country, so intake reads them as the generator means them."""
+    firm = FIRMS["abroad"]
+    m = Month(cat, tmp_path, firm=firm)
+    seen = []
+    for gd in month(firm, P, eu_service=True):
+        if gd.kind == "decont":
+            continue
+        name = "doc.zip" if gd.data[:2] == b"PK" else "doc.xml"
+        _, facts = intake(cat, m.d, P, name, gd.data)
+        assert facts["_pack"]["source_doc_id"] == gd.source_doc_id and facts["emit"], gd.name
+        seen.append(gd.kind)
+    assert {"foreign_sale", "foreign_purchase"} <= set(seen)

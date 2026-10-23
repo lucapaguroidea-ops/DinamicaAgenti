@@ -305,9 +305,10 @@ def _intake(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "issue": issue,
+                "refused": facts.get("refused"),
                 "emit": facts["emit"],
                 "failed": facts["failed"],
-                "question": facts["question"],
+                "question": facts.get("question"),
             },
             ensure_ascii=False,
         )

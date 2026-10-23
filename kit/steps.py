@@ -19,6 +19,7 @@ The package step is WP-10's (the SAGA XML renderer, waiting on R4): it refuses w
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from decimal import Decimal
 
@@ -96,13 +97,27 @@ def _month_issue(kind: str, d: Dossier, period: str) -> str:
 
 
 def intake(cat: Catalog, d: Dossier, period: str, name: str, data: bytes) -> tuple[str, dict]:
-    """Store the file and write its batch issue's facts: the pack and the gates' decision."""
-    source_hash = d.put_source(period, name, data)
-    issue = f"batch:{source_hash[:16]}"
+    """Store the file and write its batch issue's facts: the pack and the gates' decision.
+
+    An invoice the client is not on alone (neither its seller nor its buyer, or both) is not
+    the client's document: it is refused before anything is stored, as the core's upload refuses
+    it before any pack. No source, no pack, no Job; the batch issue holds only the reason, and
+    the route ends it (P13). An invoice is from abroad as the core reads it: its counterparty
+    has no RO CUI and a country other than RO, an absent country meaning RO. Its kind is then
+    its XML, whatever it came in (``foreign_invoice_xml``'s primary kind)."""
     try:
         xml, kinds = _read(data)
         ubl = parse_ubl(xml)
     except UblError:
+        ubl = None
+    if ubl is not None:
+        try:
+            view = for_client(ubl, d.client_cui)
+        except UblError as exc:
+            return _refuse(d, data, f"{exc}: not the client's invoice, refused before a pack (P13)")
+    source_hash = d.put_source(period, name, data)
+    issue = f"batch:{source_hash[:16]}"
+    if ubl is None:
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else "file"
         pack = Pack(
             client_cui=d.client_cui,
@@ -112,27 +127,30 @@ def intake(cat: Catalog, d: Dossier, period: str, name: str, data: bytes) -> tup
             kinds=[ext],
         )
     else:
-        ro = ubl.seller.cui and ubl.buyer.cui
-        try:
-            view = for_client(ubl, d.client_cui)
-            identity = {
-                "our_role": view.our_role,
-                "counterparty_cui": view.counterparty_cui,
-                "identity_ok": True,
-                "is_storno": view.is_storno,
-            }
-        except UblError:
-            identity = {"identity_ok": False}
+        other = ubl.buyer if view.our_role == "outbound" else ubl.seller
+        abroad = other.cui is None and (other.country or "RO").upper() != "RO"
         pack = Pack(
             client_cui=d.client_cui,
             period=period,
             source_hash=source_hash,
-            source_doc_id="ro_efactura_ubl" if ro else "foreign_invoice_xml",
-            kinds=kinds,
-            **identity,
+            source_doc_id="foreign_invoice_xml" if abroad else "ro_efactura_ubl",
+            kinds=["xml"] if abroad else kinds,
+            our_role=view.our_role,
+            counterparty_cui=view.counterparty_cui,
+            identity_ok=True,
+            is_storno=view.is_storno,
         )
     facts = {"_pack": pack.model_dump(), "_name": name, **_decision(cat, pack)}
     d.add_facts(issue, f"intake:{source_hash}", "kit", facts)
+    return issue, facts
+
+
+def _refuse(d: Dossier, data: bytes, reason: str) -> tuple[str, dict]:
+    """A file refused at intake: its batch issue gets the reason and nothing else."""
+    source_hash = hashlib.sha256(data).hexdigest()
+    issue = f"batch:{source_hash[:16]}"
+    facts = {"refused": reason, "emit": False, "failed": []}
+    d.add_facts(issue, f"refused:{source_hash}", "refusal", facts)
     return issue, facts
 
 
