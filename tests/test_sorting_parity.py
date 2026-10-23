@@ -1292,8 +1292,10 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     ),
     # The kit's answer path: define_class naming the core's class keeps the intake's
     # identity_ok false (kit.steps._redecide sets only source_doc_id), so no statement emits and
-    # no expense report asks for its parts; the core's routes set identity_ok. A kit defect, the
-    # core is right: a fix run, not the owner's decision.
+    # no expense report asks for its parts; the core's routes set identity_ok. It waits on the
+    # owner: the kit has no fact for identity_ok on a file that is not UBL (R8d), so the owner
+    # decides whether a person may state that the client is on it, in which question, or
+    # whether a statement reader comes first.
     "named_after_define_class": (
         {
             "decont_cheltuieli: failed ['class', 'identity'], asks None, split False": 13,

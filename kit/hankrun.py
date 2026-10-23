@@ -15,13 +15,18 @@ which blocks the work issue. The role agent's process adapter runs ``kit hank-ru
    real client's dossier: ``HankHeld`` is raised with the reason, and ``kit hank-run`` writes the
    hank's refusal facts (the same as an unpinned role's, P8) with it, so the route goes on the
    cautious way and nothing of that answer becomes a fact. On a test firm an operator's answer
-   is used, and the facts say whose it is (``_answer_sources``);
+   is used;
 3. else **render** the hank with the catalog's pins (refused while a role is unpinned, D3) and
    **run** the runtime's one command line (``kit.hanks.command``), with its cost and time limits;
 4. **verify** every role's output file (``kit verify``); when every role's passes, the answers
    are stored as the pinned models', with their run;
 5. write the **facts** the work issue's route reads: what passed, or the fail-closed reading of
-   what did not (a doubtful verdict, a contest, a read not confirmed, no suggestion).
+   what did not (a doubtful verdict, a contest, a read not confirmed, no suggestion). The facts
+   always say whose answers they were read from (``_answer_sources``, per role: a model's pin and
+   its run directory, or the operator), also when only some roles passed and nothing was
+   stored; they are keyed by the hank, its roles, the input hash, the run and the hand-off's
+   number, and ``kit.dispatch.answer_hank`` writes them only for the hand-off still pending, so
+   a replayed ``kit hank-run`` writes nothing (P9).
 
 Nothing a model wrote reaches a fact without ``verify``; the run never touches the dossier store
 except through the kit (P7).
@@ -66,6 +71,8 @@ class HankRun:
     verified: dict[str, Verified] = field(default_factory=dict)
     fields: dict = field(default_factory=dict)
     sources: dict[str, dict] = field(default_factory=dict)  # codon -> {source, by}
+    runs: dict[str, str] = field(default_factory=dict)  # codon -> the run directory it came from
+    key: str = ""  # the facts key: the same run's facts are one write (P9)
 
 
 def agent_for(cat: Catalog, hank: str) -> str:
@@ -272,7 +279,11 @@ def run_hank(
     run = HankRun(hank, issue, ran=False)
     if _one_answer(cached):
         run.sources = {c: _source(a) for c, a in cached.items()}
+        run.runs = {c: a.run for c, a in cached.items() if a.run}
         run.verified = {c: Verified(roles[c].id, True, cached[c].body) for c in roles}
+        answered = next(iter(run.runs.values()), None) or "operator:" + ",".join(
+            sorted({str(a.operator) for a in cached.values()})
+        )
     else:  # a miss or a partial hit: this run answers every role, so none reads another's
         base = _run_dir(d.folder / "runs" / issue.replace(":", "_"), f"{hank}-{ihash[:12]}")
         rendered = render(cat, repo, hank, base / "hank", tier)  # HankRefused while unpinned
@@ -293,16 +304,27 @@ def run_hank(
                 v.problems.insert(0, f"the runtime exited {code}")
             if v.ok:
                 run.sources[c] = {"source": "model", "by": rendered.models[c]}
+                run.runs[c] = where
             run.verified[c] = v
         if all(v.ok for v in run.verified.values()):  # stored only as one run's whole answer
             for c, v in run.verified.items():
                 if cached[c] is None:  # a stored answer is never replaced (P12)
                     d.put_model_answer(*keys[c], v.body, model=rendered.models[c], run=where)
+        answered = where
     run.fields = results(cat, d, hank, issue, f, inp, run.verified)
-    by_operator = {roles[c].id: s for c, s in run.sources.items() if s["source"] == "operator"}
-    if by_operator:
-        run.fields["_answer_sources"] = by_operator
+    sources = {roles[c].id: _provenance(s, run.runs.get(c)) for c, s in run.sources.items()}
+    if sources:
+        run.fields["_answer_sources"] = sources
+    run.key = f"hank:{hank}:{tier}:{','.join(r.id for r in roles.values())}:{ihash[:16]}:{answered}"
     return run
+
+
+def _provenance(source: dict, run: str | None) -> dict:
+    """Whose answer a fact was read from (P12): a model's names its pin and its run directory,
+    so a partly passing run's facts (stored nowhere else) still say where they came from."""
+    if source["source"] == "model":
+        return {"source": "model", "model": source["by"], "run": run}
+    return dict(source)
 
 
 def _run_dir(parent: Path, name: str) -> Path:

@@ -357,11 +357,10 @@ def _company(args):
 
 def _hank_run(args: argparse.Namespace) -> int:
     """One run of a hank for its work issue. Exit 0 when the facts were written (whatever the
-    model answered); 3 when the hank refused: a role is unpinned, or a cached answer is not a
-    model run's on a real dossier (the refusal facts are written, with the reason, and the
-    route goes on); 1 on an error."""
-    from kit.dispatch import REFUSALS, finish_hank, refuse_held
-    from kit.hankrun import run_hank
+    model answered), or were written before (a replay runs and writes nothing, P9); 3 when the
+    hank refused: a role is unpinned, or a cached answer is not a model run's on a real dossier
+    (the refusal facts are written, with the reason, and the route goes on); 1 on an error."""
+    from kit.dispatch import answer_hank
     from kit.hanks import HankError, HankHeld, HankRefused
     from kit.paperclip import HttpClient, PaperclipError, SetupError
     from kit.steps import StepError
@@ -372,27 +371,14 @@ def _hank_run(args: argparse.Namespace) -> int:
         _, hank, issue = key.split(":", 2)
         co, d = _company(args), open_dossier(_dossiers(args), cui)
         cat = load_catalog(args.catalog)
-        tier = (d.facts(issue).get("_hank") or {}).get("tier", "everyday")
         try:
-            run = run_hank(cat, args.root, d, hank, issue, tier=tier)
-        except HankRefused as refused:
-            finish_hank(
-                d,
-                client,
-                co,
-                issue,
-                hank,
-                f"refusal:{hank}:{refused.roles}",
-                REFUSALS[hank](d.facts(issue)),
-                source="refusal",
-            )
+            run = answer_hank(cat, args.root, d, client, co, hank, issue)
+        except (HankRefused, HankHeld) as refused:
             print(f"kit hank-run: refused: {refused}", file=sys.stderr)
             return 3
-        except HankHeld as held:
-            refuse_held(d, client, co, issue, hank, held)
-            print(f"kit hank-run: refused: {held}", file=sys.stderr)
-            return 3
-        finish_hank(d, client, co, issue, hank, f"hank:{hank}:{len(d.facts(issue))}", run.fields)
+        if run is None:
+            print(json.dumps({"hank": hank, "issue": issue, "replay": True}))
+            return 0
     except (
         SetupError,
         PaperclipError,
