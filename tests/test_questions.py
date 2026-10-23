@@ -364,6 +364,6 @@ def test_an_answer_refused_by_the_kinds_check_is_kept_as_its_digits(cat, d):
     part = {"part_hash": h("decont"), "source_doc_id": "ro_efactura_ubl", "kinds": ["ubl_spv"]}
     given = {"parts": [{**part, "counterparty_cui": "RO73645193"}]}
     out = ask(cat, d, "decont_split", {"pack": container}, given, issue="batch:k1")
-    assert out.status == "asked_again" and "not a part of" in out.error
+    assert out.status == "asked_again" and "container's own hash" in out.error
     kept = {"parts": [{**part, "counterparty_cui": "73645193"}]}
     assert out.answer == kept and d.answers("batch:k1")[-1]["answer"] == kept
