@@ -19,9 +19,10 @@ A passing answer is stored under (role, input hash, card hash) with who gave it 
 ``kit hank-run`` stores its run's answers as the role's pinned model's, with the run;
 ``kit verify --dossiers --operator`` stores a file someone supplied as that operator's. An
 operator's answer never stands in for a model run on a real client's dossier: there
-``kit hank-run`` holds the hank for a person with the reason (``HankHeld``) and writes no fact
-from it. Only on a dossier marked a test firm (``kit dossier mark-test-firm``) is it used, as
-the operator's, for rigs and development loops with no live model.
+``kit hank-run`` refuses the hank the way an unpinned role does (``HankHeld``, its reason
+kept) and writes no fact from that answer. Only on a dossier marked a test firm
+(``kit dossier mark-test-firm``) is it used, as the operator's, for rigs and development loops
+with no live model.
 """
 
 from __future__ import annotations
@@ -67,7 +68,8 @@ class HankRefused(Exception):
 
 class HankHeld(Exception):
     """A cached answer of the hank's is not a model run's output, and the dossier is a real
-    client's: nothing runs, no fact is written, a person is asked with the reason (P8, P10)."""
+    client's: nothing runs and nothing of that answer becomes a fact; the hank refuses, with the
+    reason, and a person is asked on the route (P8, P10)."""
 
     def __init__(self, hank: str, roles: list[str], reason: str, input_hash: str):
         self.hank, self.roles, self.reason, self.input_hash = hank, roles, reason, input_hash

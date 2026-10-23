@@ -357,9 +357,10 @@ def _company(args):
 
 def _hank_run(args: argparse.Namespace) -> int:
     """One run of a hank for its work issue. Exit 0 when the facts were written (whatever the
-    model answered); 3 when a role is unpinned (the refusal is written) or a cached answer is
-    an operator's on a real dossier (held for a person, the reason written); 1 on an error."""
-    from kit.dispatch import REFUSALS, finish_hank, hold_hank
+    model answered); 3 when the hank refused: a role is unpinned, or a cached answer is not a
+    model run's on a real dossier (the refusal facts are written, with the reason, and the
+    route goes on); 1 on an error."""
+    from kit.dispatch import REFUSALS, finish_hank, refuse_held
     from kit.hankrun import run_hank
     from kit.hanks import HankError, HankHeld, HankRefused
     from kit.paperclip import HttpClient, PaperclipError, SetupError
@@ -383,12 +384,13 @@ def _hank_run(args: argparse.Namespace) -> int:
                 hank,
                 f"refusal:{hank}:{refused.roles}",
                 REFUSALS[hank](d.facts(issue)),
+                source="refusal",
             )
             print(f"kit hank-run: refused: {refused}", file=sys.stderr)
             return 3
         except HankHeld as held:
-            hold_hank(d, client, co, issue, hank, held)
-            print(f"kit hank-run: held for a person: {held}", file=sys.stderr)
+            refuse_held(d, client, co, issue, hank, held)
+            print(f"kit hank-run: refused: {held}", file=sys.stderr)
             return 3
         finish_hank(d, client, co, issue, hank, f"hank:{hank}:{len(d.facts(issue))}", run.fields)
     except (

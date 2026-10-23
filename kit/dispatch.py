@@ -237,7 +237,11 @@ def _hand_off(cat, d, pc, co, issue, pid, step: Step, facts: dict, tick: Tick) -
 
     child = hank_issue(step.name, issue)
     tier = step.detail.get("tier", "everyday")
-    hid = ensure_issue(d, pc, co, child, parent=issue, assignee=agent_for(cat, step.name))
+    agent = agent_for(cat, step.name)
+    ran_before = d.paperclip_id(child) is not None
+    hid = ensure_issue(d, pc, co, child, parent=issue, assignee=agent)
+    if ran_before:  # a second run of the hank (the strong tier, a re-run): its issue reopens
+        _patch(pc, hid, status="todo", assigneeAgentId=co.id(agent), assigneeUserId=None)
     d.add_facts(
         issue,
         f"hand-off:{child}:{tier}:{facts.get('read_runs', 0)}",
@@ -256,14 +260,25 @@ def _hand_off(cat, d, pc, co, issue, pid, step: Step, facts: dict, tick: Tick) -
 
 
 def finish_hank(
-    d: Dossier, pc: Client, co: Company, issue: str, hank: str, key: str, fields: dict
+    d: Dossier,
+    pc: Client,
+    co: Company,
+    issue: str,
+    hank: str,
+    key: str,
+    fields: dict,
+    source: str = "verify",
 ) -> None:
-    """A hank run's verified facts to its work issue; the hank issue closes and the work issue
-    goes back to the Dispatcher (Paperclip also wakes it when its blocker is done)."""
-    _write(d, pc, co, issue, key, "verify", {**fields, "_hank": None})
+    """A hank run's verified facts (or its refusal's) to its work issue; the hank issue closes
+    and the work issue goes back to the Dispatcher (Paperclip also wakes it when its blocker is
+    done)."""
+    _write(d, pc, co, issue, key, source, {**fields, "_hank": None})
     hid = d.paperclip_id(hank_issue(hank, issue))
     if hid:
-        _patch(pc, hid, status="done", comment="Verified by kit verify; facts written.")
+        done = "Verified by kit verify; facts written."
+        if source == "refusal":
+            done = "Refused: the cautious facts are written; a person is asked on the route."
+        _patch(pc, hid, status="done", comment=done)
     _patch(
         pc,
         ensure_issue(d, pc, co, issue),
@@ -274,24 +289,23 @@ def finish_hank(
     )
 
 
-def hold_hank(d: Dossier, pc: Client, co: Company, issue: str, hank: str, held: HankHeld) -> None:
-    """A hank whose cached answer is not a model run's, on a real client's dossier (P8): the
-    reason is written to the work issue, which still waits on its hank issue; the hank issue
-    (or, run by hand without one, the work issue) goes to a person. No fact of the model's."""
-    d.add_facts(
-        issue,
-        f"held:{hank}:{held.input_hash[:16]}",
-        "refusal",
-        {"_hank_held": {"hank": hank, "roles": held.roles, "reason": held.reason}},
-    )
-    pid = d.paperclip_id(hank_issue(hank, issue)) or ensure_issue(d, pc, co, issue)
-    _patch(
+def refuse_held(d: Dossier, pc: Client, co: Company, issue: str, hank: str, held: HankHeld) -> None:
+    """A hank whose cached answer may not stand as a model run's (an operator's on a real
+    client's dossier; one of no recorded source anywhere) is refused the way an unpinned role
+    is (P8): the hank's refusal facts (``REFUSALS``), with the reason
+    as ``_hank_held``, go to the work issue, which goes back to the Dispatcher; its route goes
+    on the cautious way (a read to the strong tier, a doubtful verdict to a person's card, a
+    review contested, no close suggestion). Nothing of the cached answer becomes a fact."""
+    held_facts = {"hank": hank, "roles": held.roles, "reason": held.reason}
+    finish_hank(
+        d,
         pc,
-        pid,
-        status="todo",
-        assigneeUserId=co.accountant_user_id,
-        assigneeAgentId=None,
-        comment=f"Needs a person: {held.reason}",
+        co,
+        issue,
+        hank,
+        f"held:{hank}:{','.join(held.roles)}:{held.input_hash[:16]}",
+        {**REFUSALS[hank](d.facts(issue)), "_hank_held": held_facts},
+        source="refusal",
     )
 
 

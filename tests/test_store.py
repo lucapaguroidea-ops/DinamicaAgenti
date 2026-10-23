@@ -129,6 +129,24 @@ def test_a_model_answer_is_paid_once_and_carries_who_gave_it(d):
 
 
 @pytest.mark.law("P12")
+def test_an_answer_written_meanwhile_by_another_process_is_refused_the_same_way(d):
+    key = ("judge_document", h("in"), h("card"))
+    other = sqlite3.connect(d.folder / "store.db")  # another process, after any check of ours
+    with other:
+        other.execute(
+            "INSERT INTO model_answers (client_cui, role_id, input_hash, card_hash, body, at,"
+            " source, model, operator, run) VALUES (?, ?, ?, ?, ?, ?, 'operator', NULL, 'Ana',"
+            " NULL)",
+            (CLIENT, *key, '{"risk": "low"}', "2026-10-01T00:00:00+00:00"),
+        )
+    other.close()
+    with pytest.raises(StoreError, match="refused"):
+        d.put_model_answer(*key, {"risk": "high"}, model="pinned-model", run="runs/r1")
+    assert not d.put_model_answer(*key, {"risk": "low"}, operator="Ana")
+    assert d.model_answer(*key).operator == "Ana"
+
+
+@pytest.mark.law("P12")
 def test_a_model_answer_names_one_source(d):
     key = ("review_match", h("in"), h("card"))
     for bad in (

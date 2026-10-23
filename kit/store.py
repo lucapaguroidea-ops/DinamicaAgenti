@@ -117,6 +117,9 @@ _APPEND_ONLY = (
 )
 # Columns added to a table after a store was first written: (table, column, declaration).
 # A row written before has them NULL and reads as such; the kit never trusts that as a fact.
+# A store migrated this way has no CHECK tying the columns to the source (SQLite's ADD COLUMN
+# cannot add a table constraint): there ``put_model_answer`` is the check, and it validates
+# every row it writes the same way the CHECK of a new store does.
 _ADDED_COLUMNS = (
     ("model_answers", "source", "TEXT"),
     ("model_answers", "model", "TEXT"),
@@ -405,25 +408,11 @@ class Dossier:
             source = "operator"
         else:
             raise StoreError("an answer names who gave it: a model run or an operator (P12)")
-        have = self.model_answer(role_id, input_hash, card_hash)
-        if have is not None:
-            if (have.body, have.source, have.model, have.operator, have.run) == (
-                body,
-                source,
-                model,
-                operator,
-                run,
-            ):
-                return False
-            raise StoreError(
-                f"{role_id}: an answer for this input and card is already stored"
-                f" ({have.source or 'source not recorded'}"
-                f"{': ' + have.by if have.by else ''}, {have.at}): a second one is refused"
-            )
-        with self.db:
-            self.db.execute(
+        with self.db:  # the insert decides: a row written meanwhile is read as stored before
+            inserted = self.db.execute(
                 "INSERT INTO model_answers (client_cui, role_id, input_hash, card_hash, body, at,"
-                " source, model, operator, run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " source, model, operator, run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (role_id, input_hash, card_hash) DO NOTHING",
                 (
                     self.client_cui,
                     role_id,
@@ -436,8 +425,23 @@ class Dossier:
                     operator,
                     run,
                 ),
-            )
-        return True
+            ).rowcount
+        if inserted:
+            return True
+        have = self.model_answer(role_id, input_hash, card_hash)
+        if (have.body, have.source, have.model, have.operator, have.run) == (
+            body,
+            source,
+            model,
+            operator,
+            run,
+        ):
+            return False
+        raise StoreError(
+            f"{role_id}: an answer for this input and card is already stored"
+            f" ({have.source or 'source not recorded'}"
+            f"{': ' + have.by if have.by else ''}, {have.at}): a second one is refused"
+        )
 
     def model_answer(self, role_id: str, input_hash: str, card_hash: str) -> ModelAnswer | None:
         row = self.db.execute(

@@ -290,6 +290,11 @@ cited fact is in the input; a review keeps its Job; a rule matches an unexplaine
 refused judge reads as `{accounts_ok: false, risk: unknown, needs_human: true}`; a suggestion on
 a material month keeps no `file`.
 
+A stored answer records who gave it (P12): the pinned model and its run, or the operator who
+supplied it with `kit verify --dossiers --operator`. An operator's answer, or one of no recorded
+source, is used on a test-firm dossier only; on a real client's the hank refuses as if unpinned,
+with the reason (`_hank_held`).
+
 ## 7. The dossier store
 
 One dossier per client, written only by the gate kit; outside this repository.
@@ -301,7 +306,8 @@ client's file. Every record still carries the CUI and is refused on a mismatch (
 
 Built in `kit/store.py` (WP-08): `open_dossier(root, cui)` is the only way in; the file records
 its owner and refuses to open under another CUI; a trigger on every table refuses a row of another
-client; the job and answer logs are append-only (triggers); a Job's status moves forward only. The
+client; the job and answer logs and `model_answers` are append-only (triggers); a Job's status
+moves forward only. The
 database keeps its rollback journal (no WAL), so a client's store is one file to copy.
 
 ```
@@ -319,7 +325,7 @@ dossiers/{cui}/
 | Job | (client CUI, source hash) | returns the existing Job |
 | Package | `module:job:schema_version` | written once |
 | PRE / POST verdict | (job, stage, books snapshot) | returns the first verdict |
-| Model answer | (role, input hash, card hash) | reused, never paid twice |
+| Model answer | (role, input hash, card hash) | same answer from same source: no-op; another: refused |
 | Question answer | (issue, question hash) | same answer, same state |
 | Close lock | (client CUI, period) | one expected-set hash |
 | Control run | (CUI, period, control, snapshot) | stored once |
