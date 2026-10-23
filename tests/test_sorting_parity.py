@@ -73,10 +73,9 @@ asked, and every true split answer is accepted: so each of those agreements is p
 counts and probed the other way. On the probes the identity gate fails on both in 768, the
 failed gates agree non-empty in 1280, ``define_class`` is asked on both 32 times and
 ``bon_cui_unclear`` 16, and 6 split answers are asked again on both. On the kit's live path
-``bon_cui_unclear`` is never asked after ``define_class``, for a reason in the kit:
-``question_hash`` (``kit/questions.py:163``) omits the question's kind, so once ``define_class``
-is answered ``bon_fiscal`` the batch's ``bon_cui_unclear`` has the same hash and is taken as
-already answered; nothing emits (it fails closed), and it is scheduled as a fix run.
+``bon_cui_unclear`` is asked after ``define_class`` names ``bon_fiscal``: the Dispatcher's
+question carries its kind (``kit.dispatch._question``), so its hash is not ``define_class``'s,
+and its answer settles the fork and the receipt emits (``tests/test_paperclip.py``).
 
 **What it does not prove**, because neither the corpus nor the probes exercise it: a part's
 receipt fork in a split (no child of ``decont_cheltuieli`` has ``bon_cui_fork`` on either
