@@ -38,9 +38,9 @@ Conventions (checked by `kit hank check` and `tests/test_hanks.py`):
   `--operator` and stores the file as that operator's, never as a model's. A key holds one
   answer: the same answer from the same source again is a no-op, any other is refused.
 - a cache hit is all or nothing: every role of the hank has a stored answer, and either all
-  of them come from one model run, or all are an operator's on a test firm. On a partial hit the run answers every role (an explanation reads its own run's
-  verdict); a run's answers are stored only when every role's passed, and only for the roles
-  with no stored answer.
+  of them come from one model run, or all are an operator's on a test firm. On a partial hit
+  the run answers every role (an explanation reads its own run's verdict); a run's answers are
+  stored only when every role's passed, and only for the roles with no stored answer.
 - a cached answer with no recorded source is refused on every dossier, a test firm's
   included; an operator's answer is used only on a dossier marked a test firm (`kit dossier
   mark-test-firm`), for rigs and development loops with no live model, and is refused on a
@@ -52,7 +52,9 @@ Conventions (checked by `kit hank check` and `tests/test_hanks.py`):
 - the work issue's facts always say whose answers they were read from (`_answer_sources`, per
   role: the model's pin and the run directory, or the operator), also when only some roles of
   a run passed and nothing was stored. `kit hank-run` answers only the hand-off still pending:
-  a replay after its facts were written runs nothing and writes nothing (P9).
+  a replay after its facts were written runs nothing and writes nothing (P9). Each hand-off of
+  a hank on a work issue is numbered, and its facts carry the number, so a second hand-off (the
+  next job to review, a reopened close) is answered on its own.
 
 The budgets are first values (dollars and seconds per codon), to be set per role in Paperclip
 (WP-15).

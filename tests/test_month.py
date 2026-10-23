@@ -14,9 +14,19 @@ import pytest
 
 from kit.catalog import Catalog, load_catalog
 from kit.cli import main
-from kit.dispatch import Company, answer_hank, dispatch, ensure_issue, finish_hank, refuse_held
+from kit.dispatch import (
+    Company,
+    Tick,
+    _hand_off,
+    answer_hank,
+    dispatch,
+    ensure_issue,
+    finish_hank,
+    refuse_held,
+)
 from kit.hankrun import prepare, run_hank
 from kit.hanks import DOUBTFUL, HankHeld, card_hash, input_hash
+from kit.route import _hank as hank_step
 from kit.steps import intake
 from kit.store import open_dossier
 from kit.synthetic import (
@@ -666,6 +676,119 @@ def test_a_replayed_held_hank_run_writes_its_refusal_once(cat, tmp_path):
     assert not facts_rows(m, issue, "hank:")
     f = m.d.facts(issue)
     assert f["read_runs"] == 1 and f["read_confirmed"] is False and f["_hank"] is None
+
+
+def review_runtime(decision: str):
+    """Stands for the runtime on review-match: the review of whichever job it is given."""
+
+    def run(argv, cwd):
+        inp = json.loads((Path(argv[3]) / "input.json").read_text())
+        out = Path(argv[argv.index("--output") + 1]) / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        review = {"job_id": inp["job_id"], "decision": decision, "reason": "invented"}
+        (out / "review.json").write_text(json.dumps(review))
+        run.seen.append(inp["job_id"])
+        return 0
+
+    run.seen = []
+    return run
+
+
+def recon_to_review(m: Month, n: int = 2) -> tuple[str, list[str]]:
+    """The month's Reconcile, checked, with ``n`` acked Jobs' verdicts for the review."""
+    jobs = acked_month(m)
+    recon = f"recon:{CUI}:{P}"
+    assert m.run(recon).ended == "done:clear"
+    ids = [j.split(":", 1)[1] for j in jobs[:n]]
+    m.d.add_facts(recon, "to-review", "kit", {"to_review": ids})
+    return recon, ids
+
+
+@pytest.mark.law("P9")
+def test_each_job_to_review_is_its_own_hand_off_and_runs_once(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, ids = recon_to_review(m)
+    hank = f"hank:review-match:{recon}"
+    rt = review_runtime("contest")
+    for _ in ids:
+        assert m.run(recon, pcat).ended == f"wait:{hank}"
+        run = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, rt)
+        assert run is not None and run.ran  # a second hand-off is never taken for a replay
+        assert m.pc.issues[m.d.paperclip_id(hank)]["status"] == "done"
+    assert rt.seen == ids  # each job reviewed once
+    assert m.run(recon, pcat).ended == "ask:recon_review_contest"
+    f = m.d.facts(recon)
+    assert f["to_review"] == [] and f["contested"] == ids and f["_hank"] is None
+    assert len(facts_rows(m, recon, "hand-off:")) == 2
+    assert len(facts_rows(m, recon, "hank:review-match:")) == 2
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+
+
+@pytest.mark.law("P9")
+def test_a_retried_tick_hands_off_once(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, ids = recon_to_review(m)
+    pid = ensure_issue(m.d, m.pc, m.co, recon)
+    stale = m.d.facts(recon)  # the tick's facts, read before its hand-off was written
+    step = hank_step("review-match", job_ids=ids)
+    for _ in range(2):
+        t = _hand_off(pcat, m.d, m.pc, m.co, recon, pid, step, stale, Tick(recon))
+        assert t.ended == f"wait:hank:review-match:{recon}"
+    assert len(facts_rows(m, recon, "hand-off:")) == 1
+    assert m.d.facts(recon)["_hank"]["seq"] == 0
+
+
+@pytest.mark.law("P9")
+def test_a_reopened_close_is_suggested_again(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    acked_month(m)
+    close = f"close:{CUI}:{P}"
+    hank = f"hank:close-suggest:{close}"
+    outputs = {
+        "suggest.json": {"action": "file", "books_support_declaration": True, "reason": "x"},
+        "explain.json": {"explanation": "invented", "facts_cited": [], "missing": []},
+        "rule.json": {"rules": []},
+    }
+    assert m.run(close, pcat).ended == f"wait:{hank}"
+    first = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "close-suggest", close, fake_runtime(outputs))
+    assert first is not None and first.ran
+    assert m.run(close, pcat).ended == "ask:v2_close"
+    m.answer(close, action=["reopen"])
+    assert m.run(close, pcat).ended == f"wait:{hank}"
+    assert m.d.facts(close)["_hank"]["seq"] == 1
+    # the same input, served from the first run's stored answers: the same run, its own fact
+    second = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "close-suggest", close, never_runs)
+    assert second is not None and not second.ran and second.key != first.key
+    assert m.d.facts(close)["suggested"] is True and m.d.facts(close)["_hank"] is None
+    assert m.run(close, pcat).steps[0] == "ask:v2_close"  # the route goes on past the suggestion
+    assert facts_rows(m, close, "hank:close-suggest:") == [first.key, second.key]
+
+
+@pytest.mark.law("P9")
+def test_a_replay_resumes_a_stopped_answer_and_leaves_a_finished_one_alone(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, _ = recon_to_review(m, 1)
+    hank = f"hank:review-match:{recon}"
+    m.run(recon, pcat)
+    answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, review_runtime("contest"))
+    hid, rid = m.d.paperclip_id(hank), m.d.paperclip_id(recon)
+    # the run stopped after its facts: the hank issue still open, the work issue still blocked
+    m.pc.issues[hid]["status"] = "in_progress"
+    m.pc.issues[rid].update(status="blocked", blockedByIssueIds=[hid])
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+    assert m.pc.issues[hid]["status"] == "done"
+    assert m.pc.issues[rid]["status"] == "todo" and m.pc.issues[rid]["blockedByIssueIds"] == []
+    # the work issue moved on to a person's card: a replay now leaves it there
+    assert m.run(recon, pcat).ended == "ask:recon_review_contest"
+    before = dict(m.pc.issues[rid])
+    patches = [c for c in m.pc.calls if c[0] == "PATCH"]
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+    assert m.pc.issues[rid] == before
+    assert [c for c in m.pc.calls if c[0] == "PATCH"] == patches
 
 
 # ----- the month's Reconcile over acked Jobs (POST) -----

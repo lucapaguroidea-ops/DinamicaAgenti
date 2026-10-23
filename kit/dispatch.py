@@ -231,8 +231,14 @@ def hank_issue(hank: str, issue: str) -> str:
 
 
 def _hand_off(cat, d, pc, co, issue, pid, step: Step, facts: dict, tick: Tick) -> Tick:
-    """A pinned hank goes to its role agent as a child issue that blocks this one."""
-    pending = facts.get("_hank")
+    """A pinned hank goes to its role agent as a child issue that blocks this one.
+
+    Each hand-off of a hank on an issue is its own fact, numbered by the hand-offs of that hank
+    written before it (``seq``): a second hand-off (the next job to review, a reopened close's
+    suggestion, the strong tier) is a new pending ``_hank``, never a no-op on the first one's
+    key. The pending hand-off is read from the dossier, not the tick's copy of the facts, so a
+    retried tick that hands off again finds it pending and writes nothing (P9)."""
+    pending = d.facts(issue).get("_hank")
     if pending:
         tick.ended = f"wait:{pending['issue']}"
         return tick
@@ -245,11 +251,12 @@ def _hand_off(cat, d, pc, co, issue, pid, step: Step, facts: dict, tick: Tick) -
     hid = ensure_issue(d, pc, co, child, parent=issue, assignee=agent)
     if ran_before:  # a second run of the hank (the strong tier, a re-run): its issue reopens
         _patch(pc, hid, status="todo", assigneeAgentId=co.id(agent), assigneeUserId=None)
+    seq = len(d.fact_keys(issue, f"hand-off:{child}:"))
     d.add_facts(
         issue,
-        f"hand-off:{child}:{tier}:{facts.get('read_runs', 0)}",
+        f"hand-off:{child}:{tier}:#{seq}",
         "dispatcher",
-        {"_hank": {"name": step.name, "issue": child, "tier": tier}},
+        {"_hank": {"name": step.name, "issue": child, "tier": tier, "seq": seq}},
     )
     _patch(
         pc,
@@ -271,15 +278,25 @@ def finish_hank(
     key: str,
     fields: dict,
     source: str = "verify",
-) -> None:
+) -> str:
     """A hank run's verified facts (or its refusal's) to its work issue; the hank issue closes
     and the work issue goes back to the Dispatcher (Paperclip also wakes it when its blocker is
-    done)."""
+    done). Returns the facts key written.
+
+    The key carries the pending hand-off's number (``#seq``), so each hand-off's answer is its
+    own fact: a later hand-off of the same hank whose run has the same key (the same input
+    served from the same stored run) but other fields (``read_runs`` one more, another job's
+    refusal) never meets the earlier one's key, which ``add_facts`` would refuse, and an equal
+    body never turns into a no-op that leaves the hand-off pending."""
+    pending = d.facts(issue).get("_hank") or {}
+    if pending.get("issue") == hank_issue(hank, issue) and "seq" in pending:
+        key = f"{key}#{pending['seq']}"
     _write(d, pc, co, issue, key, source, {**fields, "_hank": None})
     done = "Verified by kit verify; facts written."
     if source == "refusal":
         done = "Refused: the cautious facts are written; a person is asked on the route."
     _hank_done(d, pc, co, issue, hank, done)
+    return key
 
 
 def _hank_done(d: Dossier, pc: Client, co: Company, issue: str, hank: str, done: str) -> None:
@@ -310,17 +327,21 @@ def answer_hank(
     facts (``finish_hank``), or its refusal's (``HankRefused``, ``HankHeld``: written, then
     raised). It answers only the hand-off still pending (``_hank`` names this hank's issue): a
     replay after the facts were written runs nothing and writes nothing (P9), so a read is
-    counted once; it only closes the hank issue again. Returns the run, or None on a replay."""
+    counted once. If the hank issue is not done yet (the facts were written and the run stopped
+    before closing it), the replay closes it and hands the work issue back to the Dispatcher;
+    once it is done, the work issue is left where it went (a person's card, a hold, done).
+    Returns the run, or None on a replay."""
     from kit.hankrun import run_hank, subprocess_runner
 
     child = hank_issue(hank, issue)
     pending = d.facts(issue).get("_hank")
     if not pending or pending.get("issue") != child:
         hid = d.paperclip_id(child)
-        if not pending:
-            _hank_done(d, pc, co, issue, hank, "Already answered: its facts are written.")
-        elif hid:  # another hank is pending on the work issue: it stays blocked by that one
-            _patch(pc, hid, status="done", comment="Already answered: its facts are written.")
+        if hid and (pc.request("GET", f"/api/issues/{hid}") or {}).get("status") != "done":
+            if not pending:
+                _hank_done(d, pc, co, issue, hank, "Already answered: its facts are written.")
+            else:  # another hank is pending on the work issue: it stays blocked by that one
+                _patch(pc, hid, status="done", comment="Already answered: its facts are written.")
         return None
     tier = pending.get("tier", "everyday")
     try:
@@ -333,7 +354,7 @@ def answer_hank(
     except HankHeld as held:
         refuse_held(d, pc, co, issue, hank, held)
         raise
-    finish_hank(d, pc, co, issue, hank, run.key, run.fields)
+    run.key = finish_hank(d, pc, co, issue, hank, run.key, run.fields)
     return run
 
 

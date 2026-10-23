@@ -24,9 +24,9 @@ which blocks the work issue. The role agent's process adapter runs ``kit hank-ru
    what did not (a doubtful verdict, a contest, a read not confirmed, no suggestion). The facts
    always say whose answers they were read from (``_answer_sources``, per role: a model's pin and
    its run directory, or the operator), also when only some roles passed and nothing was
-   stored; they are keyed by the hank, its roles, the input hash and the run, and
-   ``kit.dispatch.answer_hank`` writes them only for the hand-off still pending, so a replayed
-   ``kit hank-run`` writes nothing (P9).
+   stored; they are keyed by the hank, its roles, the input hash, the run and the hand-off's
+   number, and ``kit.dispatch.answer_hank`` writes them only for the hand-off still pending, so
+   a replayed ``kit hank-run`` writes nothing (P9).
 
 Nothing a model wrote reaches a fact without ``verify``; the run never touches the dossier store
 except through the kit (P7).
