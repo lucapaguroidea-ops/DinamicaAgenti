@@ -55,6 +55,7 @@ def _done(name: str, reason: str = "") -> Step:
 
 
 class BatchFacts(Closed):
+    refused: str | None = None  # intake refused the file before any pack: the reason (P13)
     emit: bool
     failed: list[str]
     question: str | None = None  # define_class | bon_cui_unclear | decont_split
@@ -65,6 +66,8 @@ class BatchFacts(Closed):
 
 
 def route_batch(f: BatchFacts) -> Step:
+    if f.refused:
+        return _done("refused", f.refused)
     if f.split and f.split_answered:
         return _done("split") if f.children_emitted else _kit("emit_children")
     if f.question:

@@ -223,6 +223,8 @@ def test_sorting_routes():
     assert step(route_batch(batch(emit=True, job_emitted=True))) == ("done", "emitted")
     done = route_batch(batch(failed=["class", "primary"]))
     assert step(done) == ("done", "not_emitted") and "primary" in done.reason
+    refused = route_batch(batch(refused="neither party is the client (P13)", emit=True))
+    assert step(refused) == ("done", "refused") and "P13" in refused.reason
 
 
 # ----- Reconcile -----

@@ -37,7 +37,7 @@ from kit.steps import APPLY, CONTEXT, EXECUTORS, LIVE_CONTEXT, Executor, StepErr
 from kit.store import Dossier, StoreError
 
 MAX_STEPS = 12
-DONE_CANCELLED = ("rejected", "failed", "not_emitted")
+DONE_CANCELLED = ("rejected", "failed", "not_emitted", "refused")
 
 
 @dataclass
