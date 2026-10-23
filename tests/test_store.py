@@ -109,12 +109,82 @@ def test_a_verdict_is_stored_once_per_snapshot(d):
 
 
 @pytest.mark.law("P9")
-def test_a_model_answer_is_paid_once(d):
-    d.put_model_answer("judge_document", h("in"), h("card"), {"risk": "low"})
-    assert d.model_answer("judge_document", h("in"), h("card")) == {"risk": "low"}
-    d.put_model_answer("judge_document", h("in"), h("card"), {"risk": "high"})
-    assert d.model_answer("judge_document", h("in"), h("card")) == {"risk": "low"}
+@pytest.mark.law("P12")
+def test_a_model_answer_is_paid_once_and_carries_who_gave_it(d):
+    key = ("judge_document", h("in"), h("card"))
+    assert d.put_model_answer(*key, {"risk": "low"}, model="pinned-model", run="runs/r1")
+    got = d.model_answer(*key)
+    assert got.body == {"risk": "low"} and got.source == "model" and got.at
+    assert (got.model, got.run, got.operator) == ("pinned-model", "runs/r1", None)
+    # the same answer again is a no-op (P9); another one is refused, never silently ignored
+    assert not d.put_model_answer(*key, {"risk": "low"}, model="pinned-model", run="runs/r1")
+    with pytest.raises(StoreError, match="refused"):
+        d.put_model_answer(*key, {"risk": "high"}, model="pinned-model", run="runs/r2")
+    with pytest.raises(StoreError, match="refused"):
+        d.put_model_answer(*key, {"risk": "low"}, operator="Ana")
+    assert d.model_answer(*key).body == {"risk": "low"}
     assert d.model_answer("judge_document", h("in"), h("other card")) is None
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        d.db.execute("UPDATE model_answers SET body = '{}'")
+
+
+@pytest.mark.law("P12")
+def test_an_answer_written_meanwhile_by_another_process_is_refused_the_same_way(d):
+    key = ("judge_document", h("in"), h("card"))
+    other = sqlite3.connect(d.folder / "store.db")  # another process, after any check of ours
+    with other:
+        other.execute(
+            "INSERT INTO model_answers (client_cui, role_id, input_hash, card_hash, body, at,"
+            " source, model, operator, run) VALUES (?, ?, ?, ?, ?, ?, 'operator', NULL, 'Ana',"
+            " NULL)",
+            (CLIENT, *key, '{"risk": "low"}', "2026-10-01T00:00:00+00:00"),
+        )
+    other.close()
+    with pytest.raises(StoreError, match="refused"):
+        d.put_model_answer(*key, {"risk": "high"}, model="pinned-model", run="runs/r1")
+    assert not d.put_model_answer(*key, {"risk": "low"}, operator="Ana")
+    assert d.model_answer(*key).operator == "Ana"
+
+
+@pytest.mark.law("P12")
+def test_a_model_answer_names_one_source(d):
+    key = ("review_match", h("in"), h("card"))
+    for bad in (
+        {},
+        {"model": "pinned-model"},  # a model's answer names its run
+        {"operator": ""},
+        {"model": "pinned-model", "run": "runs/r1", "operator": "Ana"},
+    ):
+        with pytest.raises(StoreError):
+            d.put_model_answer(*key, {"decision": "confirm"}, **bad)
+    assert d.model_answer(*key) is None
+    assert d.put_model_answer(*key, {"decision": "confirm"}, operator="Ana")
+    got = d.model_answer(*key)
+    assert (got.source, got.operator, got.model, got.run) == ("operator", "Ana", None, None)
+
+
+@pytest.mark.law("P12")
+def test_an_answer_stored_before_provenance_reads_as_of_no_known_source(tmp_path):
+    folder = tmp_path / CLIENT
+    folder.mkdir()
+    old = sqlite3.connect(folder / "store.db")
+    old.executescript(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        f"INSERT INTO meta VALUES ('client_cui', '{CLIENT}');"
+        "CREATE TABLE model_answers (client_cui TEXT NOT NULL, role_id TEXT NOT NULL,"
+        " input_hash TEXT NOT NULL, card_hash TEXT NOT NULL, body TEXT NOT NULL,"
+        " at TEXT NOT NULL, PRIMARY KEY (role_id, input_hash, card_hash));"
+        f"INSERT INTO model_answers VALUES ('{CLIENT}', 'judge_document', '{h('in')}',"
+        f" '{h('card')}', '{{\"risk\": \"low\"}}', '2026-10-01T00:00:00+00:00');"
+    )
+    old.commit()
+    old.close()
+    d = open_dossier(tmp_path, CLIENT)
+    got = d.model_answer("judge_document", h("in"), h("card"))
+    assert got.body == {"risk": "low"} and got.source is None
+    with pytest.raises(StoreError, match="refused"):
+        d.put_model_answer("judge_document", h("in"), h("card"), {"risk": "low"}, operator="Ana")
+    assert d.put_model_answer("judge_document", h("in"), h("c2"), {"risk": "low"}, operator="Ana")
 
 
 @pytest.mark.law("P9")

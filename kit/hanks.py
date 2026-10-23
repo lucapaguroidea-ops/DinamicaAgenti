@@ -13,7 +13,16 @@ a statement read must tie and belong to the client; a part must be a file of the
 cited fact must be in the input; a review keeps its Job; a drafted rule must match an
 unexplained document. A refused judge reads as the doubtful verdict, which always asks; a close
 suggestion on a material month keeps no ``file`` (P11). Nothing here runs a model or writes the
-dossier; ``kit verify --dossiers`` stores a passing answer under (role, input hash, card hash).
+dossier.
+
+A passing answer is stored under (role, input hash, card hash) with who gave it (P12):
+``kit hank-run`` stores its run's answers as the role's pinned model's, with the run;
+``kit verify --dossiers --operator`` stores a file someone supplied as that operator's. An
+operator's answer never stands in for a model run on a real client's dossier: there
+``kit hank-run`` refuses the hank the way an unpinned role does (``HankHeld``, its reason
+kept) and writes no fact from that answer. Only on a dossier marked a test firm
+(``kit dossier mark-test-firm``) is it used, as the operator's, for rigs and development loops
+with no live model.
 """
 
 from __future__ import annotations
@@ -55,6 +64,16 @@ class HankRefused(Exception):
     def __init__(self, hank: str, roles: list[str]):
         self.hank, self.roles = hank, roles
         super().__init__(f"{hank}: no pinned model for {', '.join(roles)} (D3): a person is asked")
+
+
+class HankHeld(Exception):
+    """A cached answer of the hank's is not a model run's output, and the dossier is a real
+    client's: nothing runs and nothing of that answer becomes a fact; the hank refuses, with the
+    reason, and a person is asked on the route (P8, P10)."""
+
+    def __init__(self, hank: str, roles: list[str], reason: str, input_hash: str):
+        self.hank, self.roles, self.reason, self.input_hash = hank, roles, reason, input_hash
+        super().__init__(f"{hank}: {reason}")
 
 
 # ----- the hank and its roles -----

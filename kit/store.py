@@ -53,6 +53,9 @@ _FORWARD = {
 _TERMINAL = {"already_in_sink", "rejected", "failed"}
 _ANY = {"rejected", "failed", "needs_human"}
 
+_ANSWER_SOURCE = """(source = 'model' AND model IS NOT NULL AND model != '' AND run IS NOT NULL
+        AND run != '' AND operator IS NULL) OR (source = 'operator' AND operator IS NOT NULL
+        AND operator != '' AND model IS NULL AND run IS NULL)"""
 _TABLES = {
     "jobs": """job_id TEXT PRIMARY KEY, client_cui TEXT NOT NULL, source_hash TEXT NOT NULL,
         job_kind TEXT NOT NULL, source_doc_id TEXT NOT NULL, period TEXT NOT NULL,
@@ -67,9 +70,13 @@ _TABLES = {
         stage TEXT NOT NULL CHECK (stage IN ('pre', 'post')), snapshot_id TEXT NOT NULL,
         verdict TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL,
         PRIMARY KEY (job_id, stage, snapshot_id)""",
+    # who gave the answer (P8, P12): a model run (its pinned model and run) or an operator
     "model_answers": """client_cui TEXT NOT NULL, role_id TEXT NOT NULL, input_hash TEXT NOT NULL,
         card_hash TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL,
-        PRIMARY KEY (role_id, input_hash, card_hash)""",
+        source TEXT NOT NULL, model TEXT, operator TEXT, run TEXT,
+        PRIMARY KEY (role_id, input_hash, card_hash), CHECK ("""
+    + _ANSWER_SOURCE
+    + ")",
     "answers": """seq INTEGER PRIMARY KEY AUTOINCREMENT, client_cui TEXT NOT NULL,
         issue TEXT NOT NULL, kind TEXT NOT NULL, question_hash TEXT NOT NULL,
         answer TEXT NOT NULL, proposed TEXT, operator TEXT NOT NULL, at TEXT NOT NULL,
@@ -106,6 +113,18 @@ _APPEND_ONLY = (
     "sources",
     "exports",
     "codit",
+    "model_answers",
+)
+# Columns added to a table after a store was first written: (table, column, declaration).
+# A row written before has them NULL and reads as such; the kit never trusts that as a fact.
+# A store migrated this way has no CHECK tying the columns to the source (SQLite's ADD COLUMN
+# cannot add a table constraint): there ``put_model_answer`` is the check, and it validates
+# every row it writes the same way the CHECK of a new store does.
+_ADDED_COLUMNS = (
+    ("model_answers", "source", "TEXT"),
+    ("model_answers", "model", "TEXT"),
+    ("model_answers", "operator", "TEXT"),
+    ("model_answers", "run", "TEXT"),
 )
 
 
@@ -139,6 +158,14 @@ def _schema() -> str:
     return "\n".join(parts)
 
 
+def _add_columns(db: sqlite3.Connection) -> None:
+    """Bring a store written before a column existed up to the schema, once."""
+    for table, column, decl in _ADDED_COLUMNS:
+        have = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 @dataclass(frozen=True)
 class Job:
     job_id: str
@@ -168,6 +195,24 @@ class Verdict:
     body: dict
 
 
+@dataclass(frozen=True)
+class ModelAnswer:
+    """A verified answer under (role, input hash, card hash) and who gave it (P8, P12):
+    ``source`` is ``model`` (with the pinned ``model`` and its ``run``) or ``operator`` (with
+    the ``operator`` who supplied it); ``None`` for a row stored before provenance was kept."""
+
+    body: dict
+    source: str | None
+    model: str | None
+    operator: str | None
+    run: str | None
+    at: str
+
+    @property
+    def by(self) -> str | None:
+        return self.model if self.source == "model" else self.operator
+
+
 def job_id_for(client_cui: str, source_hash: str) -> str:
     """The Job's id follows from its unique key, so a retry names the same Job."""
     return "j_" + hashlib.sha256(f"{client_cui}:{source_hash}".encode()).hexdigest()[:20]
@@ -184,6 +229,7 @@ def open_dossier(root: Path, cui: str) -> Dossier:
     db = sqlite3.connect(folder / "store.db", isolation_level=None)
     db.execute("PRAGMA foreign_keys = ON")
     db.executescript(_schema())
+    _add_columns(db)
     db.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('client_cui', ?)", (cui,))
     owner = db.execute("SELECT value FROM meta WHERE key = 'client_cui'").fetchone()[0]
     if owner != cui:
@@ -336,20 +382,77 @@ class Dossier:
         ).fetchone()
         return Verdict(job_id, stage, snapshot_id, v, json.loads(b))
 
-    def put_model_answer(self, role_id: str, input_hash: str, card_hash: str, body: dict) -> None:
-        with self.db:
-            self.db.execute(
-                "INSERT OR IGNORE INTO model_answers (client_cui, role_id, input_hash, card_hash,"
-                " body, at) VALUES (?, ?, ?, ?, ?, ?)",
-                (self.client_cui, role_id, input_hash, card_hash, json.dumps(body), _now()),
-            )
+    def put_model_answer(
+        self,
+        role_id: str,
+        input_hash: str,
+        card_hash: str,
+        body: dict,
+        *,
+        model: str | None = None,
+        run: str | None = None,
+        operator: str | None = None,
+    ) -> bool:
+        """Store a verified answer once, with who gave it: a model run (``model``, the role's
+        pinned model, and ``run``) or an ``operator``. False when the same answer from the same
+        source is already stored (P9); any other answer for the key is refused (P12)."""
+        if model is not None and operator is not None:
+            raise StoreError("an answer has one source: a model run or an operator")
+        if model is not None:
+            if not model or not run:
+                raise StoreError("a model's answer names its pinned model and its run")
+            source = "model"
+        elif operator:
+            if run is not None:
+                raise StoreError("an operator's answer is not a model run")
+            source = "operator"
+        else:
+            raise StoreError("an answer names who gave it: a model run or an operator (P12)")
+        with self.db:  # the insert decides: a row written meanwhile is read as stored before
+            inserted = self.db.execute(
+                "INSERT INTO model_answers (client_cui, role_id, input_hash, card_hash, body, at,"
+                " source, model, operator, run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (role_id, input_hash, card_hash) DO NOTHING",
+                (
+                    self.client_cui,
+                    role_id,
+                    input_hash,
+                    card_hash,
+                    json.dumps(body),
+                    _now(),
+                    source,
+                    model,
+                    operator,
+                    run,
+                ),
+            ).rowcount
+        if inserted:
+            return True
+        have = self.model_answer(role_id, input_hash, card_hash)
+        if (have.body, have.source, have.model, have.operator, have.run) == (
+            body,
+            source,
+            model,
+            operator,
+            run,
+        ):
+            return False
+        raise StoreError(
+            f"{role_id}: an answer for this input and card is already stored"
+            f" ({have.source or 'source not recorded'}"
+            f"{': ' + have.by if have.by else ''}, {have.at}): a second one is refused"
+        )
 
-    def model_answer(self, role_id: str, input_hash: str, card_hash: str) -> dict | None:
+    def model_answer(self, role_id: str, input_hash: str, card_hash: str) -> ModelAnswer | None:
         row = self.db.execute(
-            "SELECT body FROM model_answers WHERE role_id = ? AND input_hash = ? AND card_hash = ?",
+            "SELECT body, source, model, operator, run, at FROM model_answers"
+            " WHERE role_id = ? AND input_hash = ? AND card_hash = ?",
             (role_id, input_hash, card_hash),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if row is None:
+            return None
+        body, source, model, operator, run, at = row
+        return ModelAnswer(json.loads(body), source, model, operator, run, at)
 
     # ----- what came in: documents, books exports, the client's CO.DiT -----
 

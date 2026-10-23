@@ -13,9 +13,10 @@ from pathlib import Path
 import pytest
 
 from kit.catalog import Catalog, load_catalog
-from kit.dispatch import Company, dispatch, finish_hank
-from kit.hankrun import run_hank
-from kit.hanks import DOUBTFUL
+from kit.cli import main
+from kit.dispatch import Company, dispatch, ensure_issue, finish_hank, refuse_held
+from kit.hankrun import prepare, run_hank
+from kit.hanks import DOUBTFUL, HankHeld, card_hash, input_hash
 from kit.steps import intake
 from kit.store import open_dossier
 from kit.synthetic import (
@@ -54,10 +55,11 @@ def pinned(cat: Catalog) -> Catalog:
 class Month:
     """One client-month: its dossier, a fake Paperclip, and the person and SAGA answering."""
 
-    def __init__(self, cat, tmp_path, books_first=True, firm=FIRM):
+    def __init__(self, cat, tmp_path, books_first=True, firm=FIRM, test_firm=True):
         self.cat, self.pc, self.firm = cat, Fake(), firm
         self.d = open_dossier(tmp_path / "dossiers", firm.cui)
-        self.d.mark_test_firm()
+        if test_firm:
+            self.d.mark_test_firm()
         self.d.set_codit(P, firm.axes)
         labels = ("batch", "job", "recon", "close", "hank")
         self.co = Company(
@@ -293,6 +295,14 @@ def test_a_pinned_judge_runs_on_its_own_issue_and_its_verified_answer_comes_back
 
     again = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({}))
     assert not again.ran and again.fields["verdict"]["risk"] == "low"  # cached: nothing ran
+    assert "_answer_sources" not in again.fields
+    for codon, role_id in (("judge", "judge_document"), ("explain", "explain_approve")):
+        role = pcat.get("ModelRole", role_id)
+        row = m.d.model_answer(role_id, input_hash(rt.seen["input"]), card_hash(ROOT, role))
+        assert row.source == "model" and row.operator is None
+        assert row.model == role.model  # the pin it ran with, read from the catalog
+        assert row.run and (m.d.folder / row.run).is_dir()
+        assert again.sources[codon] == run.sources[codon] == {"source": "model", "by": role.model}
 
 
 @pytest.mark.law("P8")
@@ -320,9 +330,9 @@ def test_a_bad_or_failed_run_reads_the_cautious_way(cat, tmp_path):
     assert "the runtime exited 1" in failed.verified["judge"].problems[0]
 
 
-def test_a_read_of_a_scan_becomes_the_document(cat, tmp_path):
-    m = Month(cat, tmp_path)
-    batch, _ = intake(cat, m.d, P, "scan.pdf", b"%PDF-1.4 invented scan")
+def scan_issue(m: Month) -> str:
+    """A scanned invoice with no XML: its Job's issue, waiting for a read."""
+    batch, _ = intake(m.cat, m.d, P, "scan.pdf", b"%PDF-1.4 invented scan")
     job, _ = m.d.insert_job(
         CUI, m.d.facts(batch)["_pack"]["source_hash"], "ro_efactura", "ro_efactura_pdf", P
     )
@@ -341,20 +351,29 @@ def test_a_read_of_a_scan_becomes_the_document(cat, tmp_path):
             "_source_doc_id": "ro_efactura_pdf",
         },
     )
-    read = {
-        "doc_type": "invoice",
-        "statement": None,
-        "invoice": {
-            "number": "FS-7",
-            "date": "2026-09-08",
-            "seller_cui": "69314710",
-            "buyer_cui": CUI,
-            "currency": "RON",
-            "net": "100.00",
-            "vat": "21.00",
-            "gross": "121.00",
-        },
-    }
+    return issue
+
+
+READ = {
+    "doc_type": "invoice",
+    "statement": None,
+    "invoice": {
+        "number": "FS-7",
+        "date": "2026-09-08",
+        "seller_cui": "69314710",
+        "buyer_cui": CUI,
+        "currency": "RON",
+        "net": "100.00",
+        "vat": "21.00",
+        "gross": "121.00",
+    },
+}
+
+
+def test_a_read_of_a_scan_becomes_the_document(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    issue = scan_issue(m)
+    read = READ
     rt = fake_runtime({"read.json": read})
     run = run_hank(pinned(cat), ROOT, m.d, "read-document", issue, runner=rt)
     assert rt.seen["input"] == {"client_cui": CUI, "expected": "invoice", "files": ["scan.pdf"]}
@@ -386,6 +405,189 @@ def test_a_read_of_a_scan_becomes_the_document(cat, tmp_path):
         pinned(cat), ROOT, m2.d, "read-document", i2, runner=fake_runtime({"read.json": off})
     )
     assert unconfirmed.fields == {"read_runs": 1, "read_confirmed": False}
+
+
+def operator_read(m: Month, tmp_path: Path, operator: str = "op-ana") -> dict:
+    """``kit verify --dossiers`` on a read an operator wrote by hand, for the input
+    ``kit hank-run`` would prepare for the scan (the cache key is reproducible)."""
+    inp = {"client_cui": m.d.client_cui, "expected": "invoice", "files": ["scan.pdf"]}
+    (tmp_path / "input.json").write_text(json.dumps(inp))
+    (tmp_path / "read.json").write_text(json.dumps(READ))
+    argv = ["verify", "--role", "reader_document", "--input", str(tmp_path / "input.json")]
+    argv += ["--output", str(tmp_path / "read.json"), "--operator", operator]
+    argv += ["--dossiers", str(m.d.folder.parent), "--cui", m.d.client_cui]
+    assert main([*argv, "--root", str(ROOT), "--catalog", str(ROOT / "catalog")]) == 0
+    return inp
+
+
+def never_runs(argv, cwd):
+    raise AssertionError("the runtime ran")
+
+
+@pytest.mark.law("P8")
+@pytest.mark.law("P12")
+def test_an_operators_read_never_stands_in_for_a_model_run_on_a_real_dossier(cat, tmp_path, capsys):
+    m = Month(cat, tmp_path, test_firm=False)
+    issue = scan_issue(m)
+    inp = operator_read(m, tmp_path)
+    assert json.loads(capsys.readouterr().out)["stored"] is True
+    role = cat.get("ModelRole", "reader_document")
+    row = m.d.model_answer(role.id, input_hash(inp), card_hash(ROOT, role))
+    assert (row.source, row.operator, row.model) == ("operator", "op-ana", None)
+    with pytest.raises(HankHeld, match="op-ana") as held:
+        run_hank(cat, ROOT, m.d, "read-document", issue, runner=never_runs)
+    assert held.value.roles == ["reader_document"]
+    hank = f"hank:read-document:{issue}"
+    ensure_issue(m.d, m.pc, m.co, issue)
+    hid = ensure_issue(m.d, m.pc, m.co, hank, parent=issue, assignee="agent:reader")
+    refuse_held(m.d, m.pc, m.co, issue, "read-document", held.value)
+    f = m.d.facts(issue)
+    assert "_doc" not in f and "extracted" not in f and "candidates" not in f
+    assert "op-ana" in f["_hank_held"]["reason"] and f["_hank_held"]["hank"] == "read-document"
+    assert f["read_runs"] == 1 and f["read_confirmed"] is False and f["_hank"] is None
+    jid = m.d.paperclip_id(issue)
+    assert m.pc.issues[hid]["status"] == "done"  # the hank refused: the work issue moves on
+    assert m.pc.issues[jid]["assigneeAgentId"] == "agt-d"
+    assert m.pc.issues[jid]["blockedByIssueIds"] == []
+    assert m.d.jobs(P)[0].status == "ingested"  # no Job result from it
+    assert m.run(issue).ended == "done:failed"  # unpinned here: the strong read refuses too
+    assert "_doc" not in m.d.facts(issue) and not m.d.facts(issue).get("candidates")
+    row = m.d.model_answer(role.id, input_hash(inp), card_hash(ROOT, role))
+    assert (row.source, row.operator) == ("operator", "op-ana")  # kept, never superseded
+
+
+SCAN_INPUT = {"client_cui": CUI, "expected": "invoice", "files": ["scan.pdf"]}
+
+
+def legacy_rows(m: Month, rows: list[tuple[str, str, str, dict]]) -> None:
+    """A store migrated from before provenance: the columns added, no CHECK, and answers
+    written then, with no recorded source."""
+    m.d.db.executescript(
+        "DROP TABLE model_answers;"
+        "CREATE TABLE model_answers (client_cui TEXT NOT NULL, role_id TEXT NOT NULL,"
+        " input_hash TEXT NOT NULL, card_hash TEXT NOT NULL, body TEXT NOT NULL,"
+        " at TEXT NOT NULL, source TEXT, model TEXT, operator TEXT, run TEXT,"
+        " PRIMARY KEY (role_id, input_hash, card_hash));"
+    )
+    with m.d.db:
+        for role_id, ih, ch, body in rows:
+            m.d.db.execute(
+                "INSERT INTO model_answers (client_cui, role_id, input_hash, card_hash, body, at)"
+                " VALUES (?, ?, ?, ?, ?, '2026-10-01T00:00:00+00:00')",
+                (CUI, role_id, ih, ch, json.dumps(body)),
+            )
+
+
+@pytest.mark.law("P8")
+@pytest.mark.law("P12")
+@pytest.mark.parametrize("cached", ["operator_on_a_real_dossier", "no_source_on_a_test_firm"])
+def test_a_held_read_moves_on_to_the_strong_tier(cat, tmp_path, cached):
+    m = Month(cat, tmp_path, test_firm=cached != "operator_on_a_real_dossier")
+    pcat = pinned(cat)
+    issue = scan_issue(m)
+    hank = f"hank:read-document:{issue}"
+    assert m.run(issue, pcat).ended == f"wait:{hank}"
+    role = pcat.get("ModelRole", "reader_document")
+    key = (role.id, input_hash(SCAN_INPUT), card_hash(ROOT, role))
+    if cached == "operator_on_a_real_dossier":
+        m.d.put_model_answer(*key, READ, operator="op-ana")
+    else:
+        legacy_rows(m, [(*key, READ)])
+    with pytest.raises(HankHeld) as held:
+        run_hank(pcat, ROOT, m.d, "read-document", issue, runner=never_runs)
+    refuse_held(m.d, m.pc, m.co, issue, "read-document", held.value)
+    f = m.d.facts(issue)
+    assert "_doc" not in f and not f.get("candidates") and f["_hank_held"]["roles"] == [role.id]
+    assert m.run(issue, pcat).ended == f"wait:{hank}"  # the route goes on: the strong tier
+    assert m.d.facts(issue)["_hank"]["tier"] == "strong"
+    hid = m.d.paperclip_id(hank)
+    assert m.pc.issues[hid]["status"] == "todo" and m.pc.issues[hid]["assigneeAgentId"] == "agt-r"
+    rt = fake_runtime({"read.json": READ})
+    run = run_hank(pcat, ROOT, m.d, "read-document", issue, runner=rt, tier="strong")
+    assert run.ran and run.fields["read_confirmed"] and "_answer_sources" not in run.fields
+    strong = pcat.get("ModelRole", "reader_document_strong")
+    assert run.sources == {"read": {"source": "model", "by": strong.model}}
+    assert m.d.model_answer(*key).source == (
+        "operator" if cached == "operator_on_a_real_dossier" else None
+    )  # the held row stands as it was; the strong run is its own key
+
+
+@pytest.mark.law("P8")
+def test_a_held_judge_reads_doubtful_and_asks_a_person(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    job = m.take_in()[0]
+    assert m.run(job, pcat).ended == f"wait:hank:judge-document:{job}"
+    inp, _ = prepare(pcat, m.d, "judge-document", job, m.d.facts(job))
+    role = pcat.get("ModelRole", "judge_document")
+    good = {"accounts_ok": True, "risk": "low", "needs_human": False}
+    legacy_rows(m, [(role.id, input_hash(inp), card_hash(ROOT, role), good)])
+    with pytest.raises(HankHeld, match="no recorded source") as held:
+        run_hank(pcat, ROOT, m.d, "judge-document", job, runner=never_runs)
+    refuse_held(m.d, m.pc, m.co, job, "judge-document", held.value)
+    assert m.d.facts(job)["verdict"] == DOUBTFUL
+    assert m.run(job, pcat).ended == "ask:v3_approve"  # a person is asked, on a card
+    assert m.card(job)["status"] == "pending"
+
+
+@pytest.mark.law("P9")
+def test_a_partial_cache_hit_never_mixes_two_runs(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    job = m.take_in()[0]
+    m.run(job, pcat)
+    inp, _ = prepare(pcat, m.d, "judge-document", job, m.d.facts(job))
+    judge = pcat.get("ModelRole", "judge_document")
+    old = {"accounts_ok": True, "risk": "low", "needs_human": False}
+    key = (judge.id, input_hash(inp), card_hash(ROOT, judge))
+    m.d.put_model_answer(*key, old, model=judge.model, run="runs/old")
+    fresh = {"accounts_ok": True, "risk": "medium", "needs_human": False}
+    explain = {"explanation": "Risc mediu.", "facts_cited": ["document.gross"], "missing": []}
+    outputs = {"verdict.json": fresh, "explain.json": explain}
+    run = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime(outputs))
+    assert run.ran and run.fields["verdict"] == fresh  # the verdict the explanation read
+    assert m.d.model_answer(*key).body == old  # the stored one is never replaced
+    explain_role = pcat.get("ModelRole", "explain_approve")
+    ekey = (explain_role.id, input_hash(inp), card_hash(ROOT, explain_role))
+    assert m.d.model_answer(*ekey).run != "runs/old"
+    again = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime(outputs))
+    assert again.ran and again.fields["verdict"] == fresh  # two runs' rows: never one hit
+
+
+@pytest.mark.law("P9")
+def test_a_run_stores_its_answers_together_or_not_at_all(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    job = m.take_in()[0]
+    m.run(job, pcat)
+    verdict = {"accounts_ok": True, "risk": "low", "needs_human": False}
+    first = run_hank(
+        pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({"verdict.json": verdict})
+    )
+    assert first.ran and first.verified["judge"].ok and not first.verified["explain"].ok
+    judge = pcat.get("ModelRole", "judge_document")
+    inp, _ = prepare(pcat, m.d, "judge-document", job, m.d.facts(job))
+    assert m.d.model_answer(judge.id, input_hash(inp), card_hash(ROOT, judge)) is None
+    explain = {"explanation": "Uzual.", "facts_cited": ["document.gross"], "missing": []}
+    rt = fake_runtime({"verdict.json": verdict, "explain.json": explain})
+    second = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=rt)  # its own run directory
+    assert second.ran and all(v.ok for v in second.verified.values())
+    third = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=never_runs)
+    assert not third.ran and third.fields["verdict"] == verdict
+
+
+@pytest.mark.law("P8")
+@pytest.mark.law("P12")
+def test_on_a_test_firm_an_operators_read_is_used_and_says_whose_it_is(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    issue = scan_issue(m)
+    operator_read(m, tmp_path)
+    run = run_hank(cat, ROOT, m.d, "read-document", issue, runner=never_runs)
+    assert not run.ran and run.fields["_doc"]["gross"] == "121.00"
+    assert run.sources == {"read": {"source": "operator", "by": "op-ana"}}
+    assert run.fields["_answer_sources"] == {
+        "reader_document": {"source": "operator", "by": "op-ana"}
+    }
 
 
 # ----- the month's Reconcile over acked Jobs (POST) -----

@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--output", type=Path, required=True, help="the file the codon wrote")
     v.add_argument("--dossiers", type=Path, help="store a passing answer in the client's dossier")
     v.add_argument("--cui", help="the client's CUI (with --dossiers)")
+    v.add_argument("--operator", help="who supplied the file (with --dossiers): stored as theirs")
     v.add_argument("--root", type=Path, default=Path("."), help="the repository (hanks/)")
     v.add_argument("--catalog", type=Path, default=Path("catalog"))
     pc = sub.add_parser("paperclip", help="the company in Paperclip: print or apply its set-up")
@@ -356,10 +357,12 @@ def _company(args):
 
 def _hank_run(args: argparse.Namespace) -> int:
     """One run of a hank for its work issue. Exit 0 when the facts were written (whatever the
-    model answered); 3 when a role is unpinned (the refusal is written); 1 on an error."""
-    from kit.dispatch import REFUSALS, finish_hank
+    model answered); 3 when the hank refused: a role is unpinned, or a cached answer is not a
+    model run's on a real dossier (the refusal facts are written, with the reason, and the
+    route goes on); 1 on an error."""
+    from kit.dispatch import REFUSALS, finish_hank, refuse_held
     from kit.hankrun import run_hank
-    from kit.hanks import HankError, HankRefused
+    from kit.hanks import HankError, HankHeld, HankRefused
     from kit.paperclip import HttpClient, PaperclipError, SetupError
     from kit.steps import StepError
 
@@ -381,8 +384,13 @@ def _hank_run(args: argparse.Namespace) -> int:
                 hank,
                 f"refusal:{hank}:{refused.roles}",
                 REFUSALS[hank](d.facts(issue)),
+                source="refusal",
             )
             print(f"kit hank-run: refused: {refused}", file=sys.stderr)
+            return 3
+        except HankHeld as held:
+            refuse_held(d, client, co, issue, hank, held)
+            print(f"kit hank-run: refused: {held}", file=sys.stderr)
             return 3
         finish_hank(d, client, co, issue, hank, f"hank:{hank}:{len(d.facts(issue))}", run.fields)
     except (
@@ -486,23 +494,28 @@ def _hank(args: argparse.Namespace) -> int:
 
 
 def _verify(args: argparse.Namespace) -> int:
-    """Print the check of a codon's file; exit 0 when it passes (and is stored with
-    --dossiers), 1 when it is refused: the body printed is then the fallback fact, if any."""
+    """Print the check of a codon's file; exit 0 when it passes (and, with --dossiers, is
+    stored as the --operator's, never as a model run's: ``stored`` is false when the same
+    answer was already stored), 1 when it is refused, or when another answer is already
+    stored for its key: the body printed is then the fallback fact, if any."""
     try:
         cat = load_catalog(args.catalog)
         inp = json.loads(args.input.read_text(encoding="utf-8"))
         output = args.output.read_bytes() if args.output.exists() else None
         result = verify(cat, args.role, inp, output)
         stored = False
+        if args.dossiers is not None and not (args.cui and args.operator):
+            raise ValueError("--dossiers needs --cui and --operator (who supplied the file, P12)")
         if result.ok and args.dossiers is not None:
-            if not args.cui:
-                raise ValueError("--dossiers needs --cui")
             role = cat.get("ModelRole", args.role)
             dossier = open_dossier(args.dossiers, args.cui)
-            dossier.put_model_answer(
-                role.id, input_hash(inp), card_hash(args.root, role), result.body
+            stored = dossier.put_model_answer(
+                role.id,
+                input_hash(inp),
+                card_hash(args.root, role),
+                result.body,
+                operator=args.operator,
             )
-            stored = True
     except (CatalogError, StoreError, KeyError, ValueError, OSError) as err:
         print(f"kit verify: {err}", file=sys.stderr)
         return 1
