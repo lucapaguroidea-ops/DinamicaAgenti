@@ -6,10 +6,16 @@ which blocks the work issue. The role agent's process adapter runs ``kit hank-ru
 1. **prepare** the run's input from the work issue's facts (``input.json``, and the document for
    a read), written for one client into ``runs/`` of its dossier (P13);
 2. if every role of the hank already has a verified answer for this input and card (the cache
-   key: role, input hash, card hash), reuse it and run nothing (P9);
+   key: role, input hash, card hash), reuse it and run nothing (P9). A cached answer carries
+   who gave it (P12): one a model run gave with the role's pin is used; one an operator
+   supplied (``kit verify --dossiers --operator``), or one of no recorded source, never stands
+   in for a model run on a real client's dossier: the hank is held for a person with the
+   reason (``HankHeld``) and no fact is written from it. On a test firm an operator's answer is
+   used, and the facts say whose it is (``_answer_sources``);
 3. else **render** the hank with the catalog's pins (refused while a role is unpinned, D3) and
    **run** the runtime's one command line (``kit.hanks.command``), with its cost and time limits;
-4. **verify** every role's output file (``kit verify``); a passing answer is stored;
+4. **verify** every role's output file (``kit verify``); a passing answer is stored as the
+   pinned model's, with its run;
 5. write the **facts** the work issue's route reads: what passed, or the fail-closed reading of
    what did not (a doubtful verdict, a contest, a read not confirmed, no suggestion).
 
@@ -29,6 +35,7 @@ from kit.bind import candidates
 from kit.catalog import Catalog
 from kit.hanks import (
     DOUBTFUL,
+    HankHeld,
     Verified,
     card_hash,
     command,
@@ -40,7 +47,7 @@ from kit.hanks import (
 )
 from kit.recon import Doc
 from kit.steps import StepError, _pre_answer, axes_for, books
-from kit.store import Dossier
+from kit.store import Dossier, ModelAnswer
 from kit.types import normalize_cui
 
 Runner = Callable[[list[str], Path], int]
@@ -54,6 +61,7 @@ class HankRun:
     ran: bool
     verified: dict[str, Verified] = field(default_factory=dict)
     fields: dict = field(default_factory=dict)
+    sources: dict[str, dict] = field(default_factory=dict)  # codon -> {source, by}
 
 
 def agent_for(cat: Catalog, hank: str) -> str:
@@ -249,9 +257,18 @@ def run_hank(
     doc = load_hank(repo, hank)
     keys = {c: (r.id, ihash, card_hash(repo, r, doc)) for c, r in roles.items()}
     cached = {c: d.model_answer(*k) for c, k in keys.items()}
+    held = {
+        c: why
+        for c, a in cached.items()
+        if a is not None and (why := _not_usable(a, roles[c].model, d.is_test_firm))
+    }
+    if held:
+        reason = "; ".join(f"{roles[c].id}: {why}" for c, why in held.items())
+        raise HankHeld(hank, [roles[c].id for c in held], reason, ihash)
     run = HankRun(hank, issue, ran=False)
+    run.sources = {c: _source(a) for c, a in cached.items() if a is not None}
     if all(v is not None for v in cached.values()):
-        run.verified = {c: Verified(roles[c].id, True, cached[c]) for c in roles}
+        run.verified = {c: Verified(roles[c].id, True, cached[c].body) for c in roles}
     else:
         base = d.folder / "runs" / issue.replace(":", "_") / f"{hank}-{ihash[:12]}"
         rendered = render(cat, repo, hank, base / "hank", tier)  # HankRefused while unpinned
@@ -263,14 +280,43 @@ def run_hank(
             (data / name).write_bytes(blob)
         code = runner(command(rendered, data, out), base)
         run.ran = True
+        where = base.relative_to(d.folder).as_posix()
         for c, role in roles.items():
+            if cached[c] is not None:  # the stored answer stands: the first one is the one
+                run.verified[c] = Verified(role.id, True, cached[c].body)
+                continue
             found = sorted(out.rglob(role.output)) if code == 0 else []
             body = found[0].read_bytes() if len(found) == 1 else None
             v = verify(cat, role.id, inp, body)
             if code != 0:
                 v.problems.insert(0, f"the runtime exited {code}")
             if v.ok:
-                d.put_model_answer(*keys[c], v.body)
+                model = rendered.models[c]
+                d.put_model_answer(*keys[c], v.body, model=model, run=where)
+                run.sources[c] = {"source": "model", "by": model}
             run.verified[c] = v
     run.fields = results(cat, d, hank, issue, f, inp, run.verified)
+    by_operator = {roles[c].id: s for c, s in run.sources.items() if s["source"] == "operator"}
+    if by_operator:
+        run.fields["_answer_sources"] = by_operator
     return run
+
+
+def _source(a: ModelAnswer) -> dict:
+    return {"source": a.source, "by": a.by}
+
+
+def _not_usable(a: ModelAnswer, pin: str | None, test_firm: bool) -> str | None:
+    """Why a cached answer may not stand as this role's model output here; None when it may."""
+    if a.source == "model":
+        if pin is None or a.model != pin:
+            return f"cached from a model run of {a.model}, which is not the role's pin"
+        return None
+    if a.source == "operator":
+        if test_firm:
+            return None
+        return (
+            f"the cached answer was supplied by the operator {a.operator} ({a.at}), not given by"
+            " a model run: on a real client's dossier it never stands in for one (P8)"
+        )
+    return f"the cached answer ({a.at}) has no recorded source: it is not taken as a model's (P12)"

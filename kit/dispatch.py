@@ -29,7 +29,7 @@ from typing import Any
 
 from kit.cards import CardError, answer_from_result, card
 from kit.catalog import Catalog
-from kit.hanks import DOUBTFUL, HankRefused, render
+from kit.hanks import DOUBTFUL, HankHeld, HankRefused, render
 from kit.paperclip import Client
 from kit.questions import answer_question, question_hash
 from kit.route import _ROUTES, Step
@@ -271,6 +271,27 @@ def finish_hank(
         blockedByIssueIds=[],
         assigneeAgentId=co.id("agent:dispatcher"),
         assigneeUserId=None,
+    )
+
+
+def hold_hank(d: Dossier, pc: Client, co: Company, issue: str, hank: str, held: HankHeld) -> None:
+    """A hank whose cached answer is not a model run's, on a real client's dossier (P8): the
+    reason is written to the work issue, which still waits on its hank issue; the hank issue
+    (or, run by hand without one, the work issue) goes to a person. No fact of the model's."""
+    d.add_facts(
+        issue,
+        f"held:{hank}:{held.input_hash[:16]}",
+        "refusal",
+        {"_hank_held": {"hank": hank, "roles": held.roles, "reason": held.reason}},
+    )
+    pid = d.paperclip_id(hank_issue(hank, issue)) or ensure_issue(d, pc, co, issue)
+    _patch(
+        pc,
+        pid,
+        status="todo",
+        assigneeUserId=co.accountant_user_id,
+        assigneeAgentId=None,
+        comment=f"Needs a person: {held.reason}",
     )
 
 

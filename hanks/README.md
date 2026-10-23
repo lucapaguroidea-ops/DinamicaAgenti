@@ -33,6 +33,16 @@ Conventions (checked by `kit hank check` and `tests/test_hanks.py`):
   role's `answer` shape and its own check; with `--dossiers` a passing answer is stored under
   (role, input hash, card hash). The card hash covers the pin, `system.md` and the card, so a
   changed prompt or pin is never served an old answer.
+- every stored answer says who gave it (P8, P12): `kit hank-run` stores its run's answers as
+  the role's pinned model's, with the run directory; `kit verify --dossiers` needs
+  `--operator` and stores the file as that operator's, never as a model's. A key holds one
+  answer: the same answer from the same source again is a no-op, any other is refused.
+- an operator's answer never stands in for a model run on a real client's dossier: when a
+  cached answer is an operator's (or has no recorded source), `kit hank-run` runs nothing,
+  writes no fact from it and holds the hank issue for a person with the reason
+  (`_hank_held` on the work issue). Only on a dossier marked a test firm
+  (`kit dossier mark-test-firm`) is it used, for rigs and development loops with no live
+  model, and the work issue's facts say whose answer it was (`_answer_sources`).
 
 The budgets are first values (dollars and seconds per codon), to be set per role in Paperclip
 (WP-15).

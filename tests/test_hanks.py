@@ -366,7 +366,8 @@ def test_hank_command(tmp_path, capsys):
     assert "refused" in capsys.readouterr().err and not (tmp_path / "run").exists()
 
 
-def test_verify_command_stores_a_passing_answer(tmp_path, capsys):
+@pytest.mark.law("P12")
+def test_verify_command_stores_a_passing_answer_as_the_operators(tmp_path, capsys):
     (tmp_path / "input.json").write_text(json.dumps({"job_id": "j_1"}))
     (tmp_path / "review.json").write_text(
         json.dumps({"job_id": "j_1", "decision": "confirm", "reason": "aceleasi chei"})
@@ -374,11 +375,24 @@ def test_verify_command_stores_a_passing_answer(tmp_path, capsys):
     args = ["verify", "--role", "review_match", "--input", str(tmp_path / "input.json")]
     common = ["--root", str(ROOT), "--catalog", str(ROOT / "catalog")]
     stored = ["--dossiers", str(tmp_path / "d"), "--cui", CLIENT]
-    assert main([*args, "--output", str(tmp_path / "review.json"), *stored, *common]) == 0
+    review = ["--output", str(tmp_path / "review.json")]
+    assert main([*args, *review, *stored, *common]) == 1  # who supplies it must be named (P12)
+    assert "--operator" in capsys.readouterr().err
+    assert main([*args, *review, *stored, "--operator", "Ana", *common]) == 0
     assert json.loads(capsys.readouterr().out)["stored"] is True
     d = open_dossier(tmp_path / "d", CLIENT)
     role = load_catalog(ROOT / "catalog").get("ModelRole", "review_match")
     key = (input_hash({"job_id": "j_1"}), card_hash(ROOT, role))
-    assert d.model_answer("review_match", *key)["decision"] == "confirm"
+    got = d.model_answer("review_match", *key)
+    assert got.body["decision"] == "confirm"
+    assert (got.source, got.operator, got.model) == ("operator", "Ana", None)
+    assert main([*args, *review, *stored, "--operator", "Ana", *common]) == 0  # the same: no-op
+    assert json.loads(capsys.readouterr().out)["stored"] is False
+    (tmp_path / "review.json").write_text(
+        json.dumps({"job_id": "j_1", "decision": "contest", "reason": "alt partener"})
+    )
+    assert main([*args, *review, *stored, "--operator", "Bogdan", *common]) == 1
+    assert "refused" in capsys.readouterr().err
+    assert d.model_answer("review_match", *key).body["decision"] == "confirm"
     assert main([*args, "--output", str(tmp_path / "missing.json"), *common]) == 1
     assert "was not written" in capsys.readouterr().out
