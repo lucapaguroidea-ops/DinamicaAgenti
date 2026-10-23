@@ -28,7 +28,10 @@ in the kit's shape (``_as_kit``: the same facts, the kit's names). The probes, w
 quarter never holds: 5120 packs (every one of the 16 shared source documents × 8 kinds × identity
 × 5 counterparty spellings × storno × the receipt fork), 512 of them through the graph for the
 questions; eleven ``decont_split`` answers on one container; every invoice upload sent to the
-next firm, which is on neither side (365); every RO invoice as its bare XML (357).
+next firm, which is on neither side (365); every RO invoice as its bare XML (357); and 1776
+invented B2C variants of the quarter's 148 RO sales, the buyer replaced by one whose CUI is
+absent or a valid RO one and whose country is absent, RO or DE, each as an SPV zip and as bare
+XML.
 
 Compared, field by field: the class each upload is given; the pack (every field both packs
 have); the decision (emit, the Job kind under the core's ``job_`` names, the failed gates under
@@ -42,11 +45,16 @@ not); the failed gates on 625; the question and the split on 668 (13 ``decont_sp
 none); the identity gate on 668. The 13 true split answers are accepted on both, and 33 of the
 42 parts are the same pack field by field. The two catalogs' Job kinds list the same documents.
 On the probes: emit on 5078 of 5120 and the Job kind wherever both emit; the failed gates on
-1588; the questions on all 512; 8 of the 11 split answers. Every difference falls in a declared
-gap, and emit turns only on ``gates_by_row`` and ``counterparty_cui_spelling``.
+1588; the questions on all 512; 8 of the 11 split answers; on the B2C probes the class, emit, the
+Job kind and the failed gates on 1036 of 1776. Every difference falls in a declared gap; on the
+grid emit turns only on ``gates_by_row`` and ``counterparty_cui_spelling``, on the B2C probes
+only on ``counterparty_without_cui`` and ``foreign_kinds_in_an_spv_zip``.
 
 **Live paths.** The kit's intake on the 365 invoice uploads gives the core's pack field by field
 and the core's decision on all 365 (``kit intake``, whose batch issue the Dispatcher routes).
+The same live intake on a RO invoice whose counterparty has no CUI and is not abroad calls it
+foreign and, as bare XML, emits a ``foreign_invoice`` Job where the core fails the identity gate
+(``counterparty_without_cui``, a kit defect, to be fixed with ``not_the_clients_invoice``).
 The rest is not live on the Dispatcher's path: its intake calls a statement or an expense report
 ``unknown`` (``class_by_route``), and after ``define_class`` names it the pack keeps
 ``identity_ok`` false, so no statement emits and no expense report asks for its parts
@@ -62,7 +70,11 @@ agree only where both lists are empty (625), ``define_class`` and ``bon_cui_uncl
 asked, and every true split answer is accepted: so each of those agreements is pinned by these
 counts and probed the other way. On the probes the identity gate fails on both in 768, the
 failed gates agree non-empty in 1280, ``define_class`` is asked on both 32 times and
-``bon_cui_unclear`` 16, and 6 split answers are asked again on both.
+``bon_cui_unclear`` 16, and 6 split answers are asked again on both. On the kit's live path
+``bon_cui_unclear`` is never asked after ``define_class``, for a reason in the kit:
+``question_hash`` (``kit/questions.py:163``) omits the question's kind, so once ``define_class``
+is answered ``bon_fiscal`` the batch's ``bon_cui_unclear`` has the same hash and is taken as
+already answered; nothing emits (it fails closed), and it is scheduled as a fix run.
 
 **What it does not prove**, because neither the corpus nor the probes exercise it: a part's
 receipt fork in a split (no child of ``decont_cheltuieli`` has ``bon_cui_fork`` on either
@@ -82,6 +94,7 @@ import ast
 import functools
 import hashlib
 import io
+import re
 import subprocess
 import tempfile
 import typing
@@ -98,6 +111,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from poarta_contabila import core, jsonlogic, triage
 from poarta_contabila.jobs import InMemoryJobStore
+from poarta_contabila.synthetic.docs import SIGNATURE, stable_zip
 from poarta_contabila.synthetic.months import realistic
 from poarta_contabila.types import JobRecord, SourceRef, TenantRef
 from test_calendar import _pinned_checkout
@@ -666,6 +680,104 @@ def _foreign_probes() -> dict:
     return {"stranger": dict(stranger), "bare": dict(bare)}
 
 
+B2C_CUIS = (None, PARTNER)
+B2C_COUNTRIES = (None, "RO", "DE")
+
+
+def _b2c_buyer(cui: str | None, country: str | None) -> str:
+    """An invented buyer: a person (no CUI) or a RO firm (a valid CUI), its country absent or
+    given."""
+    address = "<cac:PostalAddress><cbc:StreetName>Strada Sintetica 2</cbc:StreetName>"
+    address += "<cbc:CityName>Exempla</cbc:CityName>"
+    if country:
+        address += f"<cac:Country><cbc:IdentificationCode>{country}</cbc:IdentificationCode>"
+        address += "</cac:Country>"
+    address += "</cac:PostalAddress>"
+    tax = (
+        f"<cac:PartyTaxScheme><cbc:CompanyID>RO{cui}</cbc:CompanyID>"
+        "<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>"
+        if cui
+        else ""
+    )
+    legal = "<cac:PartyLegalEntity><cbc:RegistrationName>CUMPARATOR EXEMPLU</cbc:RegistrationName>"
+    legal += "<cbc:CompanyID>J00/2/2021</cbc:CompanyID>" if cui else ""
+    legal += "</cac:PartyLegalEntity>"
+    return (
+        f"<cac:AccountingCustomerParty><cac:Party>{address}{tax}{legal}</cac:Party>"
+        "</cac:AccountingCustomerParty>"
+    )
+
+
+@cache
+def _b2c_probes() -> tuple[tuple[str, str, str, dict, dict], ...]:
+    """Live-path probes the quarter never holds: each of the quarter's 148 RO sales (140
+    invoices, 8 credit notes; the client is the seller) with its buyer replaced by an invented
+    one, the buyer's CUI absent or a valid RO one × its country absent, RO or DE, each as an SPV
+    zip and as its bare XML (1776). Each side sorts the same bytes: the kit through
+    ``kit.steps.intake``, the core through its runtime's pack assembly and ``decide_emit``.
+    Rows: (form, CUI, country, the kit's outcome, the core's)."""
+    out = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for firm, m in _months().values():
+            d = open_dossier(Path(tmp), firm.cui)
+            for u in m.uploads:
+                inv = u.doc
+                if u.route != "ingest" or inv.foreign or inv.side != "out":
+                    continue
+                base = inv.xml(firm).decode("utf-8")
+                for cui, country in product(B2C_CUIS, B2C_COUNTRIES):
+                    xml = re.sub(
+                        r"<cac:AccountingCustomerParty>.*?</cac:AccountingCustomerParty>",
+                        _b2c_buyer(cui, country),
+                        base,
+                        flags=re.S,
+                    ).encode("utf-8")
+                    spv = stable_zip(
+                        [(f"{inv.spv_id}.xml", xml), (f"semnatura_{inv.spv_id}.xml", SIGNATURE)]
+                    )
+                    for form, data in (("zip", spv), ("xml", xml)):
+                        name = f"{inv.ref}-{cui or 'none'}-{country or 'none'}.{form}"
+                        _, f = ks.intake(_kcat(), d, inv.period, name, data)
+                        cp = _core_upload_pack(firm, name, data)
+                        c = _core_decide(cp)
+                        kit = {
+                            "source_doc_id": f["_pack"]["source_doc_id"],
+                            "kinds": f["_pack"]["kinds"],
+                            "emit": f["emit"],
+                            "job_kind": f"job_{f['_job_kind']}" if f["_job_kind"] else None,
+                            "failed": sorted(GATE[g] for g in f["failed"]),
+                        }
+                        cor = {"source_doc_id": cp.source_doc_id, "kinds": cp.kinds, **c}
+                        out.append(
+                            (form, "RO CUI" if cui else "no CUI", country or "absent", kit, cor)
+                        )
+    return tuple(out)
+
+
+def _b2c_outcome(o: dict) -> str:
+    job = f" {o['job_kind']}" if o["job_kind"] else ""
+    return f"{o['source_doc_id']} {o['kinds']}: emit {o['emit']}{job}, failed {o['failed']}"
+
+
+def _b2c_tally(rows) -> tuple[dict, dict]:
+    kit, cor = Counter(), Counter()
+    for form, cui, country, k, c in rows:
+        where = f"{form}, {cui}, country {country}"
+        kit[f"{where}: {_b2c_outcome(k)}"] += 1
+        cor[f"{where}: {_b2c_outcome(c)}"] += 1
+    return dict(kit), dict(cor)
+
+
+def _b2c_gap(form: str, cui: str, country: str) -> str | None:
+    """The declared gap a B2C probe's difference falls in (None: no difference expected but
+    the kinds of a RO invoice as bare XML, which is ``bare_xml_kinds``)."""
+    if cui == "no CUI" and country != "DE":
+        return "counterparty_without_cui"
+    if cui == "no CUI" and form == "zip":
+        return "foreign_kinds_in_an_spv_zip"
+    return None
+
+
 def _after_define_class() -> tuple[dict, dict]:
     """The kit's live answer path on the statements and expense reports its intake calls
     ``unknown``: ``define_class`` answered with the core's class (``kit.steps.APPLY``), then the
@@ -767,6 +879,8 @@ def _observed(gap: str) -> tuple[object, object]:
             {k: v for k, v in s.items() if "(core)" not in k},
             {k: v for k, v in s.items() if "(core)" in k},
         )
+    if gap in ("counterparty_without_cui", "foreign_kinds_in_an_spv_zip"):
+        return _b2c_tally(r for r in _b2c_probes() if _b2c_gap(*r[:3]) == gap)
     if gap == "source_doc_ids":
         mine, theirs = set(kcat.ids("SourceDoc")), set(ccat.source_docs)
         return sorted(mine - theirs), sorted(theirs - mine)
@@ -1050,6 +1164,34 @@ def test_the_splits_agree_on_the_true_answers_and_on_most_probes() -> None:
     }
 
 
+def test_the_b2c_probes_agree_where_the_buyer_has_a_cui_or_is_abroad_in_xml() -> None:
+    """The 1776 B2C probes (148 sales × buyer CUI absent or a valid RO one × country absent,
+    RO or DE × SPV zip or bare XML): the class, emit, the Job kind and the failed gates agree
+    on 1036, the 888 with a RO CUI (whatever the country and form) and the 148 with no CUI and
+    a country abroad as bare XML; with a RO CUI the bare XML's kinds differ as in
+    ``bare_xml_kinds`` (444). The 740 others are each in a declared gap:
+    ``counterparty_without_cui`` (592: no CUI, country absent or RO) and
+    ``foreign_kinds_in_an_spv_zip`` (148: no CUI, abroad, in an SPV zip)."""
+    rows = _b2c_probes()
+    assert len(rows) == 1776
+    keys = ("source_doc_id", "emit", "job_kind", "failed")
+    seen = Counter()
+    for form, cui, country, k, c in rows:
+        same = all(k[x] == c[x] for x in keys)
+        gap = _b2c_gap(form, cui, country)
+        assert same == (gap is None), (form, cui, country, k, c)
+        if k["kinds"] != c["kinds"] and gap is None:
+            assert (form, cui, k["kinds"], c["kinds"]) == ("xml", "RO CUI", ["xml"], ["ubl_spv"])
+            gap = "bare_xml_kinds"
+        seen[gap] += 1
+    assert seen == {
+        None: 888 + 148 - 444,
+        "bare_xml_kinds": 444,
+        "counterparty_without_cui": 592,
+        "foreign_kinds_in_an_spv_zip": 148,
+    }
+
+
 def test_both_catalogs_list_the_same_documents_under_each_job_kind() -> None:
     """Under the core's ``job_`` prefix, each Job kind lists the same source documents and the
     same storno flag on both catalogs; only the names differ (``job_kind_ids``)."""
@@ -1112,7 +1254,8 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     ),
     # The kit's answer path: define_class naming the core's class keeps the intake's
     # identity_ok false (kit.steps._redecide sets only source_doc_id), so no statement emits and
-    # no expense report asks for its parts; the core's routes set identity_ok.
+    # no expense report asks for its parts; the core's routes set identity_ok. A kit defect, the
+    # core is right: a fix run, not the owner's decision.
     "named_after_define_class": (
         {
             "decont_cheltuieli: failed ['class', 'identity'], asks None, split False": 13,
@@ -1132,7 +1275,8 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     # Every invoice sent to a firm that is on neither side: the kit's intake makes a pack with
     # identity_ok false; a RO invoice then fails the identity gate (no counterparty CUI), but a
     # foreign one emits, since foreign_invoice_xml needs neither the client nor a counterparty
-    # CUI on the document; the core refuses all before any pack (to_canonical).
+    # CUI on the document; the core refuses all before any pack (to_canonical). A kit defect,
+    # the core is right: a fix run under P13, not the owner's decision.
     "not_the_clients_invoice": (
         {"foreign_invoice_xml: emitted": 8, "ro_efactura_ubl: not emitted ['identity']": 357},
         {
@@ -1259,13 +1403,18 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
         {"probes: identity_gate '0…': failed": 64, "probes: identity_gate 'RO…': passed": 64},
         {"probes: identity_gate '0…': passed": 64, "probes: identity_gate 'RO…': failed": 64},
     ),
-    # A split part's CUI: the kit's Part takes any str, the core's SplitPart a valid key.
+    # A split part's CUI: the kit's Part takes any str, the core's SplitPart a valid key. This
+    # is kit.sorting.split called directly: on the Dispatcher's and kit answer's path the answer
+    # record check (cui?) strips RO and refuses a bad check digit first (the questions step's
+    # cui_spelling, the answer grammar), so it is reachable only through kit emit --split and
+    # kit/scenario.py.
     "split_part_cui": (
         {"counterparty 'RO…'": "accepted", "counterparty check digit": "accepted"},
         {"counterparty 'RO…'": "asked_again", "counterparty check digit": "asked_again"},
     ),
     # A split part with no kind: the kit accepts it (the child then fails its primary gate),
-    # the core's SplitPart needs one.
+    # the core's SplitPart needs one. The same fact as the no-kind part of the questions step's
+    # decont_split_parts, there in the answer grammar.
     "split_part_without_kind": ({"no kind": "accepted"}, {"no kind": "asked_again"}),
     # A working-papers part's role: the container's in the kit (no default on its row), n/a in
     # the core (its row's default).
@@ -1349,6 +1498,60 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     "caller_shapes": (
         ["Pack", "SplitError", "decide", "split"],
         {"Pack": "absent", "SplitError": "absent", "decide": "absent", "split": "absent"},
+    ),
+    # A RO invoice whose counterparty has no CUI and is not abroad (a sale to a person, the
+    # buyer's country absent or RO): the kit's intake calls every invoice without both CUIs
+    # foreign_invoice_xml (kit/steps.py: ro = seller CUI and buyer CUI), so as bare XML it emits
+    # a foreign_invoice Job (credit notes fail job_kind) and in an SPV zip it fails primary; the
+    # core's runtime calls it foreign only with no CUI and a country other than RO, so it is a
+    # ro_efactura_ubl that fails the identity gate. Live on the Dispatcher's path (kit intake).
+    # A kit defect, the core is right: a fix run, with not_the_clients_invoice.
+    "counterparty_without_cui": (
+        {
+            "xml, no CUI, country RO: foreign_invoice_xml ['xml']: emit False, failed "
+            "['job_kind']": 8,
+            "xml, no CUI, country RO: foreign_invoice_xml ['xml']: emit True "
+            "job_foreign_invoice, failed []": 140,
+            "xml, no CUI, country absent: foreign_invoice_xml ['xml']: emit False, failed "
+            "['job_kind']": 8,
+            "xml, no CUI, country absent: foreign_invoice_xml ['xml']: emit True "
+            "job_foreign_invoice, failed []": 140,
+            "zip, no CUI, country RO: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['job_kind', 'primary_gate']": 8,
+            "zip, no CUI, country RO: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['primary_gate']": 140,
+            "zip, no CUI, country absent: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['job_kind', 'primary_gate']": 8,
+            "zip, no CUI, country absent: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['primary_gate']": 140,
+        },
+        {
+            "xml, no CUI, country RO: ro_efactura_ubl ['ubl_spv']: emit False, failed "
+            "['identity_gate']": 148,
+            "xml, no CUI, country absent: ro_efactura_ubl ['ubl_spv']: emit False, failed "
+            "['identity_gate']": 148,
+            "zip, no CUI, country RO: ro_efactura_ubl ['ubl_spv']: emit False, failed "
+            "['identity_gate']": 148,
+            "zip, no CUI, country absent: ro_efactura_ubl ['ubl_spv']: emit False, failed "
+            "['identity_gate']": 148,
+        },
+    ),
+    # An invoice from abroad (no CUI, country DE) in an SPV zip: the kit's kinds are the
+    # container's (ubl_spv), which foreign_invoice_xml's primary gate refuses; the core's are
+    # the source document's (xml), so it emits.
+    "foreign_kinds_in_an_spv_zip": (
+        {
+            "zip, no CUI, country DE: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['job_kind', 'primary_gate']": 8,
+            "zip, no CUI, country DE: foreign_invoice_xml ['ubl_spv']: emit False, failed "
+            "['primary_gate']": 140,
+        },
+        {
+            "zip, no CUI, country DE: foreign_invoice_xml ['xml']: emit False, failed "
+            "['job_kind']": 8,
+            "zip, no CUI, country DE: foreign_invoice_xml ['xml']: emit True "
+            "job_foreign_invoice, failed []": 140,
+        },
     ),
 }
 

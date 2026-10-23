@@ -822,7 +822,8 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
         },
     ),
     # A decont part's counterparty CUI: the kit strips RO and refuses a leading zero, the core
-    # refuses RO and takes a leading zero.
+    # refuses RO and takes a leading zero. This is the answer grammar (check_record, cui?); the
+    # sorting step's split_part_cui is kit.sorting.split called directly, past this grammar.
     "cui_spelling": (
         {
             "decont_split.parts.counterparty_cui '041526372': refused": 1,
@@ -834,7 +835,8 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
         },
     ),
     # No part, a part with no kind, a kind outside the core's PrimaryKind: the kit accepts, the
-    # core refuses (min_length=1, PrimaryKind).
+    # core refuses (min_length=1, PrimaryKind). The part with no kind is the same fact as the
+    # sorting step's split_part_without_kind.
     "decont_split_parts": (
         {
             "decont_split.parts []: accepted": 1,
