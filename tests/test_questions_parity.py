@@ -44,7 +44,7 @@ that stand against them is compared: ``_v2``'s material-month refusal, ``_ambigu
 field positions (name, type and options); 4 of 5 enum fields' options, in order; 931 of 1021
 answer shapes (119 accepted on both, 812 refused on both); 162 of 174 check cases (18 accepted on
 both, 144 asked again on both); the question's hash on all 24 questions given the
-same dict, with the ``error`` dropped on both.
+same dict, with the ``error`` dropped on both, and as asked, each question carrying its kind.
 
 **Live paths.** The kit's live callers ask thirteen kinds: the router's asks (``kit/route.py``),
 Sorting's questions (``kit/sorting.py`` and the catalog's split question), answered through
@@ -103,6 +103,8 @@ from test_calendar import _pinned_checkout
 from kit import questions as kq
 from kit import steps as ks
 from kit.catalog import load_catalog
+from kit.dispatch import _question
+from kit.route import Step
 from kit.types import cui_is_valid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -544,6 +546,14 @@ def _questions() -> list[tuple[str, dict]]:
     return qs
 
 
+def _kit_asked(kind: str, q: dict) -> dict:
+    """The question as the kit's Dispatcher asks it (``kit.dispatch._question``): with its kind.
+    Checked on a kind that reads nothing from the dossier, so no dossier is needed."""
+    asked = _question(None, "x", Step(kind="ask", name="v2_close"), {"_ask:v2_close": {"a": 1}})
+    assert asked == {"issue": "x", "a": 1, "kind": "v2_close"}
+    return {**q, "kind": kind}
+
+
 def _hash_view() -> dict[str, int]:
     out: Counter = Counter()
     for kind, q in _questions():
@@ -551,7 +561,9 @@ def _hash_view() -> dict[str, int]:
         out["error ignored"] += kq.question_hash({**q, "error": "x"}) == core_question_hash(
             {**q, "error": [{"msg": "x"}]}
         )
-        out["as asked"] += kq.question_hash(q) == core_question_hash({"kind": kind, **q})
+        out["as asked"] += kq.question_hash(_kit_asked(kind, q)) == core_question_hash(
+            {"kind": kind, **q}
+        )
         out["questions"] += 1
     return dict(out)
 
@@ -670,10 +682,12 @@ def test_the_two_in_core_checks_agree_outside_the_declared_gaps() -> None:
 def test_the_question_hash_agrees_on_the_same_dict_and_ignores_the_error_on_both() -> None:
     """The kit's ``question_hash`` and the core's namesake (``poarta_contabila.answers``, outside
     the core) on all 24 questions: the same digest for the same dict, and the ``error`` dropped
-    on both. As asked, the core's question also carries its ``kind`` (``hitl.ask``), so no key
-    agrees (gap ``question_key``). A probe: questions that differ in one value hash apart on both
-    sides, so a hash that ignored the question would fail here."""
-    assert _hash_view() == {"same dict": 24, "error ignored": 24, "as asked": 0, "questions": 24}
+    on both. As asked, both sides' questions carry their ``kind`` (the kit's Dispatcher,
+    ``kit.dispatch._question``; the core's ``hitl.ask``), so the key agrees as asked on all 24
+    too; the hash function's home differs (gap ``question_key``). A probe: questions that
+    differ in one value hash apart on both sides, so a hash that ignored the question would
+    fail here."""
+    assert _hash_view() == {"same dict": 24, "error ignored": 24, "as asked": 24, "questions": 24}
     a, b = {"rules": ["r_a"]}, {"rules": ["r_b"]}
     assert kq.question_hash(a) != kq.question_hash(b)
     assert core_question_hash(a) != core_question_hash(b)
@@ -871,11 +885,11 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
             "seed refused": ["auto", "exig", "saf_t", "zzz"],
         },
     ),
-    # The key: as asked, the core's question carries its kind (hitl.ask), the kit's does not, so
-    # the same question has another hash (all 24); the core's question_hash is outside the core.
+    # The key: as asked, both questions carry their kind (kit.dispatch._question, hitl.ask), so
+    # the same question has the same hash (all 24); the core's question_hash is outside the core.
     "question_key": (
-        {"as asked": 0, "home": "kit.questions"},
-        {"as asked": 0, "home": "poarta_contabila.answers"},
+        {"as asked": 24, "home": "kit.questions"},
+        {"as asked": 24, "home": "poarta_contabila.answers"},
     ),
     # The answer log's outcomes; the core's log is outside the core (poarta_contabila.answers).
     "answer_log": (["accepted", "asked_again"], ["accepted", "asked_again", "no_question"]),

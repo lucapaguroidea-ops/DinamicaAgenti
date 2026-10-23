@@ -324,23 +324,37 @@ def _hold(pc: Client, pid: str, co: Company, tick: Tick, reason: str) -> Tick:
 
 
 def _question(d: Dossier, issue: str, step: Step, facts: dict) -> dict:
-    """The question as asked: the route's detail, what the steps wrote for it, and what its
-    check needs from the dossier now (``CONTEXT``)."""
+    """The question as asked: its kind, the route's detail, what the steps wrote for it, and
+    what its check needs from the dossier now (``CONTEXT``). The kind is part of the question,
+    so two kinds asked on the same facts are two questions, with two hashes."""
     q = {"issue": issue, **step.detail, **facts.get(f"_ask:{step.name}", {})}
     if step.name in CONTEXT:
         q.update({k: v for k, v in CONTEXT[step.name](d, issue, facts).items() if v is not None})
     if step.name == "define_articol" and q.get("candidates"):
         q["choices"] = {"articol_id": list(q["candidates"])}
+    q["kind"] = step.name
     return q
+
+
+def _asked_before(d: Dossier, issue: str, kind: str, question: dict) -> list[dict]:
+    """The answers on record to this question: under its hash, or under the hash it had before
+    the question carried its kind (the same dict without ``kind``), for this kind only."""
+    qhash = question_hash(question)
+    old = question_hash({k: v for k, v in question.items() if k != "kind"})
+    return [
+        a
+        for a in d.answers(issue)
+        if a["question_hash"] == qhash or (a["question_hash"] == old and a["kind"] == kind)
+    ]
 
 
 def _ask(cat, d, issue, pid, pc, co, step: Step, facts: dict, tick: Tick) -> Tick:
     kind = step.name
     question = _question(d, issue, step, facts)
-    qhash = question_hash(question)
-    if any(a["question_hash"] == qhash and a["outcome"] == "accepted" for a in d.answers(issue)):
+    before = _asked_before(d, issue, kind, question)
+    if any(a["outcome"] == "accepted" for a in before):
         return _hold(pc, pid, co, tick, f"{kind} is answered; applying it is not wired yet")
-    attempt = sum(1 for a in d.answers(issue) if a["question_hash"] == qhash)
+    attempt = len(before)
     _open_card(cat, d, issue, pid, pc, co, kind, question, attempt, None)
     tick.ended = f"ask:{kind}"
     return tick

@@ -554,3 +554,88 @@ def test_a_decont_parts_cui_is_stored_and_passed_on_as_its_digits(cat, tmp_path,
     assert d.facts(issue)["_parts"][0]["counterparty_cui"] == PARTNER
     child = d.facts("batch:" + "a" * 16)["_pack"]
     assert child["counterparty_cui"] == PARTNER
+
+
+# ----- a question's key carries its kind -----
+
+
+def _pdf_batch(cat, d, name="bon.pdf") -> str:
+    from kit.steps import intake
+
+    issue, facts = intake(cat, d, "2026-09", name, b"%PDF-1.4 an invented receipt")
+    assert facts["question"] == "define_class"
+    return issue
+
+
+@pytest.mark.law("P9", "P12")
+def test_a_receipt_named_by_define_class_is_asked_its_cui_and_emits(cat, tmp_path):
+    """define_class answered bon_fiscal: bon_cui_unclear is a question of its own (its own
+    hash), asked on a new card, and its answer settles the fork, so the receipt emits."""
+    from kit.questions import question_hash
+
+    d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
+    issue = _pdf_batch(cat, d)
+    assert dispatch(cat, ROOT, d, issue, pc, co).ended == "ask:define_class"
+    pid = d.paperclip_id(issue)
+    pc.resolve(pid, "answered", answered(source_doc_id="bon_fiscal"))
+    tick = dispatch(cat, ROOT, d, issue, pc, co)
+    assert tick.steps == ["answered:define_class", "ask:bon_cui_unclear"]
+    assert tick.ended == "ask:bon_cui_unclear" and len(pc.cards[pid]) == 2
+    bon = d.facts(issue)["_card"]["question"]
+    assert bon["kind"] == "bon_cui_unclear"
+    (cls,) = [a for a in d.answers(issue) if a["kind"] == "define_class"]
+    assert question_hash(bon) != cls["question_hash"]
+
+    pc.resolve(pid, "answered", answered(cu_cui=["true"], fara_cui=["false"]))
+    done = dispatch(cat, ROOT, d, issue, pc, co)
+    assert done.steps == ["answered:bon_cui_unclear", "kit:emit", "done:emitted"]
+    assert [j.source_doc_id for j in d.jobs("2026-09")] == ["bon_fiscal"]
+    assert [a["outcome"] for a in d.answers(issue)] == ["accepted", "accepted"]
+
+
+@pytest.mark.law("P9")
+def test_an_answer_kept_under_the_key_without_its_kind_is_still_found(cat, tmp_path, monkeypatch):
+    """An accepted answer recorded before the question carried its kind is found again under
+    its old key, for the same kind only, so it is never asked twice."""
+    import kit.dispatch
+    from kit.questions import question_hash
+
+    monkeypatch.setattr(kit.dispatch, "APPLY", {})
+    d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
+    issue = f"close:{CLIENT}:2026-09"
+    ctx = {"material": False}
+    d.add_facts(
+        issue,
+        "seed",
+        "kit",
+        {"locked": True, "diffed": True, "suggested": True, "_ask:v2_close": ctx},
+    )
+    old = question_hash({"issue": issue, **ctx})  # the question as asked before this fix
+    d.record_answer(issue, "v2_close", old, {"action": "hold"}, None, "accepted", "user-acc")
+    tick = dispatch(cat, ROOT, d, issue, pc, co)
+    assert tick.ended.startswith("hold: v2_close is answered")
+    assert not pc.cards.get(d.paperclip_id(issue))
+
+
+@pytest.mark.law("P9")
+def test_an_old_key_of_another_kind_does_not_answer_the_question(cat, tmp_path):
+    """define_class answered under the old key (no kind): the receipt's bon_cui_unclear, whose
+    question was the same dict, is still asked."""
+    from kit.questions import question_hash
+    from kit.steps import APPLY
+
+    d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
+    issue = _pdf_batch(cat, d)
+    old = question_hash({"issue": issue})
+    answer = {"source_doc_id": "bon_fiscal"}
+    d.record_answer(issue, "define_class", old, answer, None, "accepted", "user-acc")
+    q = {"issue": issue}
+    d.add_facts(
+        issue,
+        "answer:old",
+        "answer",
+        APPLY["define_class"](cat, d, issue, d.facts(issue), q, answer),
+    )
+    tick = dispatch(cat, ROOT, d, issue, pc, co)
+    assert tick.ended == "ask:bon_cui_unclear"
+    assert len(pc.cards[d.paperclip_id(issue)]) == 1
