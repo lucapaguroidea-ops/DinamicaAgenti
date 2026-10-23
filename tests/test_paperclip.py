@@ -24,6 +24,7 @@ from kit.paperclip import (
     plan_company,
 )
 from kit.questions import parse_type
+from kit.sorting import Pack, decide
 from kit.store import open_dossier
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -510,3 +511,46 @@ def test_setup_command_prints_the_plan(monkeypatch, capsys):
     assert main(["paperclip", "setup", "--file", str(ROOT / "paperclip" / "company.yaml")]) == 0
     first = json.loads(capsys.readouterr().out.splitlines()[0])
     assert first["ref"] == "company" and first["path"] == "/api/companies"
+
+
+PARTNER = "73645193"  # invented; passes the check digit
+
+
+@pytest.mark.law("P10")
+@pytest.mark.parametrize("spelled", ["RO73645193", "ro73645193", " 73645193 ", "RO 73645193"])
+def test_a_decont_parts_cui_is_stored_and_passed_on_as_its_digits(cat, tmp_path, spelled):
+    d, pc, co = open_dossier(tmp_path, CLIENT), Fake(), company()
+    container = {
+        "client_cui": CLIENT,
+        "period": "2026-09",
+        "source_hash": "c" * 64,
+        "source_doc_id": "decont_cheltuieli",
+        "kinds": ["xlsx"],
+        "identity_ok": True,
+    }
+    part = {
+        "part_hash": "a" * 64,
+        "source_doc_id": "ro_efactura_ubl",
+        "kinds": ["ubl_spv"],
+        "counterparty_cui": spelled,
+    }
+    issue = "batch:" + "c" * 16
+    dec = decide(cat, Pack.model_validate(container))
+    assert dec.question == "decont_split"
+    seed = {"_pack": container, **dec.model_dump(exclude={"job_kind", "job_key"})}
+    d.add_facts(issue, "seed", "kit", {**seed, "_proposed": {"parts": [part]}})
+    assert dispatch(cat, ROOT, d, issue, pc, co).ended == "ask:decont_split"
+    pid = d.paperclip_id(issue)
+    pc.resolve(
+        pid,
+        "accepted",
+        {"version": 1, "outcome": "accepted", "selectedOptionIds": [part["part_hash"]]},
+    )
+    tick = dispatch(cat, ROOT, d, issue, pc, co)
+    assert tick.steps[:2] == ["answered:decont_split", "kit:emit_children"]
+    log = d.answers(issue)
+    assert log[-1]["outcome"] == "accepted"
+    assert log[-1]["answer"]["parts"][0]["counterparty_cui"] == PARTNER
+    assert d.facts(issue)["_parts"][0]["counterparty_cui"] == PARTNER
+    child = d.facts("batch:" + "a" * 16)["_pack"]
+    assert child["counterparty_cui"] == PARTNER

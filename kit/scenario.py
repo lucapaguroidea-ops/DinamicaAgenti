@@ -284,7 +284,7 @@ def run_month(
             if out.status != "accepted":
                 raise ScenarioError(out.error)
             trails.append(trail)
-            for part, child in zip(gd.parts, split(cat, container, answer), strict=True):
+            for part, child in zip(gd.parts, split(cat, container, out.answer), strict=True):
                 t = Trail(part.name, None)
                 _walk_job(cat, d, firm, child, part.data, t)
                 jobs[part.number] = t.job_id
