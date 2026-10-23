@@ -1,5 +1,9 @@
 """The CLI: built commands work, planned ones refuse instead of pretending."""
 
+from pathlib import Path
+
+import pytest
+
 from kit.cli import PLANNED, main
 
 
@@ -87,11 +91,10 @@ def test_read_command(tmp_path, capsys):
     assert "BR-CO-16" in capsys.readouterr().err
 
 
-def test_emit_into_a_dossier(tmp_path, capsys):
+def _emit_pack(**kw) -> dict:
     import hashlib
-    import json
 
-    pack = {
+    base = {
         "client_cui": "41526372",
         "period": "2026-09",
         "source_hash": hashlib.sha256(b"doc").hexdigest(),
@@ -100,14 +103,117 @@ def test_emit_into_a_dossier(tmp_path, capsys):
         "our_role": "inbound",
         "counterparty_cui": "73645193",
     }
+    return {**base, **kw}
+
+
+def _dossier_rows(root) -> dict:
+    """Every table of the client's dossier, row by row: what an emit must not change."""
+    import sqlite3
+
+    db = sqlite3.connect(root / "41526372" / "store.db")
+    names = [n for (n,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+    rows = {n: sorted(map(repr, db.execute(f"SELECT * FROM {n}"))) for n in names}
+    db.close()
+    return rows
+
+
+@pytest.mark.law("P12")
+def test_emit_never_writes_a_job_into_a_dossier(tmp_path, capsys):
+    """``kit emit --dossiers`` would insert a Job from a hand-written pack: no source stored,
+    no answer recorded. It is refused, names the recorded paths and changes nothing."""
+    import json
+
+    from kit.store import open_dossier
+
+    root = tmp_path / "dossiers"
+    open_dossier(root, "41526372")
+    before = _dossier_rows(root)
+    (tmp_path / "pack.json").write_text(json.dumps(_emit_pack()))
+    assert main(["emit", str(tmp_path / "pack.json"), "--dossiers", str(root)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "kit intake" in captured.err and "kit answer" in captured.err
+    assert "Dispatcher" in captured.err
+    assert _dossier_rows(root) == before
+    assert not open_dossier(root, "41526372").jobs("2026-09")
+    assert not (tmp_path / "fresh").exists()
+    assert main(["emit", str(tmp_path / "pack.json"), "--dossiers", str(tmp_path / "fresh")]) == 1
+    assert not (tmp_path / "fresh").exists()
+
+
+def _decont(tmp_path) -> tuple:
+    """A container pack and a decont_split answer naming one e-invoice part."""
+    import hashlib
+    import json
+
+    part = hashlib.sha256(b"inv").hexdigest()
+    container = _emit_pack(
+        source_doc_id="decont_cheltuieli", kinds=["xlsx"], counterparty_cui=None, identity_ok=True
+    )
+    answer = {
+        "parts": [
+            {
+                "part_hash": part,
+                "source_doc_id": "ro_efactura_ubl",
+                "kinds": ["ubl_spv"],
+                "counterparty_cui": "73645193",
+            }
+        ]
+    }
+    (tmp_path / "container.json").write_text(json.dumps(container))
+    (tmp_path / "answer.json").write_text(json.dumps(answer))
+    return tmp_path / "container.json", tmp_path / "answer.json", part
+
+
+@pytest.mark.law("P12")
+def test_emit_split_with_dossiers_is_refused_not_ignored(tmp_path, capsys):
+    from kit.store import open_dossier
+
+    container, answer, _ = _decont(tmp_path)
+    root = tmp_path / "dossiers"
+    open_dossier(root, "41526372")
+    before = _dossier_rows(root)
+    args = ["emit", str(container), "--split", str(answer), "--dossiers", str(root)]
+    assert main(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "kit answer" in captured.err and "Dispatcher" in captured.err
+    assert _dossier_rows(root) == before
+
+
+@pytest.mark.law("P12")
+def test_a_split_child_cannot_become_a_job_through_emit(tmp_path, capsys):
+    """The reviewer's chain: ``--split`` prints a child with identity_ok true, and emitting that
+    child with ``--dossiers`` inserted a Job with no answer and no source. It now cannot."""
+    import json
+
+    from kit.store import open_dossier
+
+    container, answer, part = _decont(tmp_path)
+    assert main(["emit", str(container), "--split", str(answer)]) == 0
+    children = json.loads(capsys.readouterr().out)
+    assert children[0]["pack"]["identity_ok"] and children[0]["decision"]["emit"]
+    assert not (tmp_path / "dossiers").exists()  # the dry run writes nothing
+    (tmp_path / "child.json").write_text(json.dumps(children[0]["pack"]))
+    root = tmp_path / "dossiers"
+    assert main(["emit", str(tmp_path / "child.json"), "--dossiers", str(root)]) == 1
+    assert "kit intake" in capsys.readouterr().err
+    d = open_dossier(root, "41526372")
+    assert not d.jobs("2026-09")
+    assert d.answers(f"batch:{part}") == []
+
+
+def test_emit_without_dossiers_prints_the_decision_unchanged(tmp_path, capsys):
+    import json
+
+    from kit.catalog import load_catalog
+    from kit.sorting import Pack, decide
+
+    pack = _emit_pack()
     (tmp_path / "pack.json").write_text(json.dumps(pack))
-    args = ["emit", str(tmp_path / "pack.json"), "--dossiers", str(tmp_path / "dossiers")]
-    assert main(args) == 0
-    first = json.loads(capsys.readouterr().out)
-    assert main(args) == 0
-    again = json.loads(capsys.readouterr().out)
-    assert first["created"] and not again["created"] and first["job_id"] == again["job_id"]
-    assert (tmp_path / "dossiers" / "41526372" / "store.db").is_file()
+    assert main(["emit", str(tmp_path / "pack.json")]) == 0
+    expected = decide(load_catalog(Path("catalog")), Pack.model_validate(pack)).model_dump()
+    assert json.loads(capsys.readouterr().out) == expected
 
 
 def test_answer_command(tmp_path, capsys):

@@ -38,11 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("value")
     k = sub.add_parser("catalog", help="load and check the catalog; print rows per catalog")
     k.add_argument("root", nargs="?", type=Path, default=Path("catalog"))
-    e = sub.add_parser("emit", help="Sorting: the emit gates of one file (a pack as JSON)")
+    e = sub.add_parser(
+        "emit",
+        help="Sorting, a dry run: the emit gates of one file (a pack as JSON); writes nothing",
+    )
     e.add_argument("pack", type=Path, help="the pack, a JSON file")
     e.add_argument("--split", type=Path, help="a decont_split answer (JSON): print the children")
     e.add_argument("--catalog", type=Path, default=Path("catalog"))
-    e.add_argument("--dossiers", type=Path, help="insert the Job into the client's dossier here")
+    e.add_argument("--dossiers", type=Path, help="refused: a Job comes only from the recorded path")
     r = sub.add_parser("read", help="read an e-invoice: UBL XML or the SPV zip (XML first)")
     r.add_argument("file", type=Path)
     r.add_argument("--client", help="the client's CUI: says inbound or outbound")
@@ -173,32 +176,33 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+EMIT_WRITES_NOTHING = (
+    "kit emit is a dry run and writes nothing into a dossier: a Job comes only from the recorded"
+    " path (P12). A document: kit intake (its source stored, its gates, its batch issue). A"
+    " decont_split answer: the Dispatcher (kit dispatch), which records the answer with who gave"
+    " it and emits the parts; kit answer --kind decont_split records and checks one."
+)
+
+
 def _emit(args: argparse.Namespace) -> int:
-    """Print the decision for a pack, or with --split the children and their decisions.
+    """Print the decision for a pack, or with --split the children and their decisions: a dry
+    run that writes nothing. With --dossiers it is refused, naming the recorded path (P12).
     Exit 0 when it ran; 1 when the input or the catalog is refused (the reason on stderr)."""
+    if args.dossiers is not None:
+        print(f"kit emit: {EMIT_WRITES_NOTHING}", file=sys.stderr)
+        return 1
     try:
         cat = load_catalog(args.catalog)
         pack = Pack.model_validate(json.loads(args.pack.read_text(encoding="utf-8")))
         if args.split is None:
-            decision = decide(cat, pack)
-            out: object = decision.model_dump()
-            if args.dossiers is not None and decision.emit:
-                dossier = open_dossier(args.dossiers, pack.client_cui)
-                job, created = dossier.insert_job(
-                    pack.client_cui,
-                    pack.source_hash,
-                    decision.job_kind,
-                    pack.source_doc_id,
-                    pack.period,
-                )
-                out = {**decision.model_dump(), "job_id": job.job_id, "created": created}
+            out: object = decide(cat, pack).model_dump()
         else:
             answer = json.loads(args.split.read_text(encoding="utf-8"))
             out = [
                 {"pack": c.model_dump(), "decision": decide(cat, c).model_dump()}
                 for c in split(cat, pack, answer)
             ]
-    except (CatalogError, SplitError, StoreError, ValueError, OSError) as err:
+    except (CatalogError, SplitError, ValueError, OSError) as err:
         print(f"kit emit: {err}", file=sys.stderr)
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))

@@ -63,8 +63,9 @@ The rest is not live on the Dispatcher's path: its intake calls a statement or a
 ``kit/scenario.py`` only (``kit scenario``); ``split`` is reached on the Dispatcher's path only
 after a ``decont_split`` answer, which that path never asks, so the split comparisons have no
 asker there (``kit answer --kind decont_split``, ``kit emit --split`` and ``kit verify --role
-reader_split`` reach ``split`` through the CLI). The 248 statement lines have no builder in the kit:
-no kit module builds an ``extras_statement_pdf`` pack (``kit emit`` decides a hand-written one).
+reader_split`` reach ``split`` through the CLI; ``kit emit`` is a dry run that writes nothing).
+The 248 statement lines have no builder in the kit: no kit module builds an
+``extras_statement_pdf`` pack (``kit emit`` decides a hand-written one).
 
 **Vacuity.** On the corpus the identity gate passes on both for all 668 packs, the failed gates
 agree only where both lists are empty (625), ``define_class`` and ``bon_cui_unclear`` are never
@@ -1432,8 +1433,8 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     # A split part's CUI: the kit's Part takes any str, the core's SplitPart a valid key. This
     # is kit.sorting.split called directly: on the Dispatcher's and kit answer's path the answer
     # record check (cui?) strips RO and refuses a bad check digit first (the questions step's
-    # cui_spelling, the answer grammar), so it is reachable only through kit emit --split and
-    # kit/scenario.py.
+    # cui_spelling, the answer grammar), so it is reachable only through kit emit --split (a dry
+    # run: it prints the children and writes nothing) and kit/scenario.py.
     "split_part_cui": (
         {"counterparty 'RO…'": "accepted", "counterparty check digit": "accepted"},
         {"counterparty 'RO…'": "asked_again", "counterparty check digit": "asked_again"},
