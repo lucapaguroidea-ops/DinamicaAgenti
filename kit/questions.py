@@ -12,9 +12,12 @@ A question kind is a catalog row: its actor and its answer shape, written in a s
 the SAGA agent's by a person), validates the answer against the shape (P10), runs the kind's
 check against the question it answers, and appends the outcome to the client's answer log (P12):
 ``accepted``, or ``asked_again`` with the reason — the same question is asked again with an
-``error`` field, and the node that asked it never moves on a refused answer. An accepted answer
-is kept in the kit's stored form (``canonical``): a ``cui`` as its digits, whatever spelling the
-grammar accepted, so the log, the kind's check and what applies the answer all see one value.
+``error`` field, and the node that asked it never moves on a refused answer. An answer that
+passes the shape check is put in the kit's stored form (``canonical``) before the kind's check
+runs: a ``cui`` as its digits, whatever spelling the grammar accepted, so the log, the kind's
+check and what applies the answer all see one value. It is logged and returned in that form
+whether the kind's check then accepts or refuses it; only an answer refused by the shape check
+is logged and returned as given.
 """
 
 from __future__ import annotations
@@ -304,7 +307,7 @@ class Outcome:
     error: str | None
     question_hash: str
     question: dict  # the question as asked next: with ``error`` when asked again
-    answer: Any = None  # accepted: the answer as stored (``canonical``); else as given
+    answer: Any = None  # past the shape check: ``canonical`` (accepted or not); else as given
 
 
 def check_record(value: Any, shape: dict[str, str]) -> list[str]:
