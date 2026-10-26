@@ -593,6 +593,13 @@ class Dossier:
             )
         return True
 
+    def fact_keys(self, issue: str, prefix: str = "") -> list[str]:
+        """The keys of the issue's facts that start with ``prefix``, in the order written."""
+        rows = self.db.execute(
+            "SELECT key FROM issue_facts WHERE issue = ? ORDER BY seq", (issue,)
+        ).fetchall()
+        return [k for (k,) in rows if k.startswith(prefix)]
+
     def facts(self, issue: str) -> dict:
         """The issue's facts: every write merged in order, a later field over an earlier one."""
         merged: dict = {}

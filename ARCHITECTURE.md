@@ -291,9 +291,12 @@ refused judge reads as `{accounts_ok: false, risk: unknown, needs_human: true}`;
 a material month keeps no `file`.
 
 A stored answer records who gave it (P12): the pinned model and its run, or the operator who
-supplied it with `kit verify --dossiers --operator`. An operator's answer, or one of no recorded
-source, is used on a test-firm dossier only; on a real client's the hank refuses as if unpinned,
-with the reason (`_hank_held`).
+supplied it with `kit verify --dossiers --operator`. An answer of no recorded source is refused
+on every dossier, a test firm's included. An operator's answer is used on a test-firm dossier
+only; on a real client's it is refused. A refused answer makes the hank refuse as if unpinned,
+with the reason (`_hank_held`). The facts a run writes name the model and run directory (or the
+operator) behind every answer they were read from (`_answer_sources`), also when only some roles
+passed and nothing was stored; a replayed `kit hank-run` writes nothing (P9).
 
 ## 7. The dossier store
 

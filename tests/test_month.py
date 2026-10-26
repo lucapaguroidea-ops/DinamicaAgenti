@@ -14,9 +14,19 @@ import pytest
 
 from kit.catalog import Catalog, load_catalog
 from kit.cli import main
-from kit.dispatch import Company, dispatch, ensure_issue, finish_hank, refuse_held
+from kit.dispatch import (
+    Company,
+    Tick,
+    _hand_off,
+    answer_hank,
+    dispatch,
+    ensure_issue,
+    finish_hank,
+    refuse_held,
+)
 from kit.hankrun import prepare, run_hank
 from kit.hanks import DOUBTFUL, HankHeld, card_hash, input_hash
+from kit.route import _hank as hank_step
 from kit.steps import intake
 from kit.store import open_dossier
 from kit.synthetic import (
@@ -295,7 +305,7 @@ def test_a_pinned_judge_runs_on_its_own_issue_and_its_verified_answer_comes_back
 
     again = run_hank(pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({}))
     assert not again.ran and again.fields["verdict"]["risk"] == "low"  # cached: nothing ran
-    assert "_answer_sources" not in again.fields
+    assert again.fields["_answer_sources"] == run.fields["_answer_sources"]  # the run it read
     for codon, role_id in (("judge", "judge_document"), ("explain", "explain_approve")):
         role = pcat.get("ModelRole", role_id)
         row = m.d.model_answer(role_id, input_hash(rt.seen["input"]), card_hash(ROOT, role))
@@ -303,6 +313,11 @@ def test_a_pinned_judge_runs_on_its_own_issue_and_its_verified_answer_comes_back
         assert row.model == role.model  # the pin it ran with, read from the catalog
         assert row.run and (m.d.folder / row.run).is_dir()
         assert again.sources[codon] == run.sources[codon] == {"source": "model", "by": role.model}
+        assert again.fields["_answer_sources"][role_id] == {
+            "source": "model",
+            "model": role.model,
+            "run": row.run,
+        }
 
 
 @pytest.mark.law("P8")
@@ -504,9 +519,12 @@ def test_a_held_read_moves_on_to_the_strong_tier(cat, tmp_path, cached):
     assert m.pc.issues[hid]["status"] == "todo" and m.pc.issues[hid]["assigneeAgentId"] == "agt-r"
     rt = fake_runtime({"read.json": READ})
     run = run_hank(pcat, ROOT, m.d, "read-document", issue, runner=rt, tier="strong")
-    assert run.ran and run.fields["read_confirmed"] and "_answer_sources" not in run.fields
+    assert run.ran and run.fields["read_confirmed"]
     strong = pcat.get("ModelRole", "reader_document_strong")
     assert run.sources == {"read": {"source": "model", "by": strong.model}}
+    assert run.fields["_answer_sources"] == {
+        strong.id: {"source": "model", "model": strong.model, "run": run.runs["read"]}
+    }  # the strong run's, never the held answer's
     assert m.d.model_answer(*key).source == (
         "operator" if cached == "operator_on_a_real_dossier" else None
     )  # the held row stands as it was; the strong run is its own key
@@ -576,6 +594,30 @@ def test_a_run_stores_its_answers_together_or_not_at_all(cat, tmp_path):
     assert not third.ran and third.fields["verdict"] == verdict
 
 
+@pytest.mark.law("P12")
+def test_a_partly_passing_run_names_the_model_and_run_behind_its_facts(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    job = m.take_in()[0]
+    m.run(job, pcat)
+    verdict = {"accounts_ok": True, "risk": "low", "needs_human": False}
+    run = run_hank(
+        pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({"verdict.json": verdict})
+    )
+    assert run.verified["judge"].ok and not run.verified["explain"].ok
+    assert run.fields["verdict"] == verdict  # the passing verdict is a fact, its answer unstored
+    judge = pcat.get("ModelRole", "judge_document")
+    sources = run.fields["_answer_sources"]
+    assert list(sources) == [judge.id]  # the failed explanation gives no fact, so no source
+    assert sources[judge.id]["source"] == "model" and sources[judge.id]["model"] == judge.model
+    where = sources[judge.id]["run"]
+    assert (m.d.folder / where / "out").is_dir()
+    second = run_hank(
+        pcat, ROOT, m.d, "judge-document", job, runner=fake_runtime({"verdict.json": verdict})
+    )
+    assert second.fields["_answer_sources"][judge.id]["run"] == f"{where}-2"  # its own run
+
+
 @pytest.mark.law("P8")
 @pytest.mark.law("P12")
 def test_on_a_test_firm_an_operators_read_is_used_and_says_whose_it_is(cat, tmp_path):
@@ -588,6 +630,165 @@ def test_on_a_test_firm_an_operators_read_is_used_and_says_whose_it_is(cat, tmp_
     assert run.fields["_answer_sources"] == {
         "reader_document": {"source": "operator", "by": "op-ana"}
     }
+
+
+def facts_rows(m: Month, issue: str, prefix: str) -> list[str]:
+    rows = m.d.db.execute("SELECT key FROM issue_facts WHERE issue = ?", (issue,)).fetchall()
+    return [k for (k,) in rows if k.startswith(prefix)]
+
+
+@pytest.mark.law("P9")
+@pytest.mark.parametrize("read", ["confirmed", "not_confirmed"])
+def test_a_replayed_hank_run_writes_its_facts_once(cat, tmp_path, read):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    issue = scan_issue(m)
+    hank = f"hank:read-document:{issue}"
+    assert m.run(issue, pcat).ended == f"wait:{hank}"
+    body = READ if read == "confirmed" else {"doc_type": "invoice"}  # the second fails verify
+    first = answer_hank(
+        pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, fake_runtime({"read.json": body})
+    )
+    assert first is not None and first.ran
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs) is None
+    assert facts_rows(m, issue, "hank:read-document:") == [first.key]
+    f = m.d.facts(issue)
+    assert f["read_runs"] == 1 and f["_hank"] is None
+    assert f["read_confirmed"] is (read == "confirmed")
+    assert m.pc.issues[m.d.paperclip_id(hank)]["status"] == "done"
+    assert m.pc.issues[m.d.paperclip_id(issue)]["blockedByIssueIds"] == []
+
+
+@pytest.mark.law("P9")
+@pytest.mark.law("P8")
+def test_a_replayed_held_hank_run_writes_its_refusal_once(cat, tmp_path):
+    m = Month(cat, tmp_path, test_firm=False)
+    pcat = pinned(cat)
+    issue = scan_issue(m)
+    assert m.run(issue, pcat).ended == f"wait:hank:read-document:{issue}"
+    role = pcat.get("ModelRole", "reader_document")
+    key = (role.id, input_hash(SCAN_INPUT), card_hash(ROOT, role))
+    m.d.put_model_answer(*key, READ, operator="op-ana")
+    with pytest.raises(HankHeld):
+        answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs)
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "read-document", issue, never_runs) is None
+    assert len(facts_rows(m, issue, "held:read-document:")) == 1
+    assert not facts_rows(m, issue, "hank:")
+    f = m.d.facts(issue)
+    assert f["read_runs"] == 1 and f["read_confirmed"] is False and f["_hank"] is None
+
+
+def review_runtime(decision: str):
+    """Stands for the runtime on review-match: the review of whichever job it is given."""
+
+    def run(argv, cwd):
+        inp = json.loads((Path(argv[3]) / "input.json").read_text())
+        out = Path(argv[argv.index("--output") + 1]) / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        review = {"job_id": inp["job_id"], "decision": decision, "reason": "invented"}
+        (out / "review.json").write_text(json.dumps(review))
+        run.seen.append(inp["job_id"])
+        return 0
+
+    run.seen = []
+    return run
+
+
+def recon_to_review(m: Month, n: int = 2) -> tuple[str, list[str]]:
+    """The month's Reconcile, checked, with ``n`` acked Jobs' verdicts for the review."""
+    jobs = acked_month(m)
+    recon = f"recon:{CUI}:{P}"
+    assert m.run(recon).ended == "done:clear"
+    ids = [j.split(":", 1)[1] for j in jobs[:n]]
+    m.d.add_facts(recon, "to-review", "kit", {"to_review": ids})
+    return recon, ids
+
+
+@pytest.mark.law("P9")
+def test_each_job_to_review_is_its_own_hand_off_and_runs_once(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, ids = recon_to_review(m)
+    hank = f"hank:review-match:{recon}"
+    rt = review_runtime("contest")
+    for _ in ids:
+        assert m.run(recon, pcat).ended == f"wait:{hank}"
+        run = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, rt)
+        assert run is not None and run.ran  # a second hand-off is never taken for a replay
+        assert m.pc.issues[m.d.paperclip_id(hank)]["status"] == "done"
+    assert rt.seen == ids  # each job reviewed once
+    assert m.run(recon, pcat).ended == "ask:recon_review_contest"
+    f = m.d.facts(recon)
+    assert f["to_review"] == [] and f["contested"] == ids and f["_hank"] is None
+    assert len(facts_rows(m, recon, "hand-off:")) == 2
+    assert len(facts_rows(m, recon, "hank:review-match:")) == 2
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+
+
+@pytest.mark.law("P9")
+def test_a_retried_tick_hands_off_once(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, ids = recon_to_review(m)
+    pid = ensure_issue(m.d, m.pc, m.co, recon)
+    stale = m.d.facts(recon)  # the tick's facts, read before its hand-off was written
+    step = hank_step("review-match", job_ids=ids)
+    for _ in range(2):
+        t = _hand_off(pcat, m.d, m.pc, m.co, recon, pid, step, stale, Tick(recon))
+        assert t.ended == f"wait:hank:review-match:{recon}"
+    assert len(facts_rows(m, recon, "hand-off:")) == 1
+    assert m.d.facts(recon)["_hank"]["seq"] == 0
+
+
+@pytest.mark.law("P9")
+def test_a_reopened_close_is_suggested_again(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    acked_month(m)
+    close = f"close:{CUI}:{P}"
+    hank = f"hank:close-suggest:{close}"
+    outputs = {
+        "suggest.json": {"action": "file", "books_support_declaration": True, "reason": "x"},
+        "explain.json": {"explanation": "invented", "facts_cited": [], "missing": []},
+        "rule.json": {"rules": []},
+    }
+    assert m.run(close, pcat).ended == f"wait:{hank}"
+    first = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "close-suggest", close, fake_runtime(outputs))
+    assert first is not None and first.ran
+    assert m.run(close, pcat).ended == "ask:v2_close"
+    m.answer(close, action=["reopen"])
+    assert m.run(close, pcat).ended == f"wait:{hank}"
+    assert m.d.facts(close)["_hank"]["seq"] == 1
+    # the same input, served from the first run's stored answers: the same run, its own fact
+    second = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "close-suggest", close, never_runs)
+    assert second is not None and not second.ran and second.key != first.key
+    assert m.d.facts(close)["suggested"] is True and m.d.facts(close)["_hank"] is None
+    assert m.run(close, pcat).steps[0] == "ask:v2_close"  # the route goes on past the suggestion
+    assert facts_rows(m, close, "hank:close-suggest:") == [first.key, second.key]
+
+
+@pytest.mark.law("P9")
+def test_a_replay_resumes_a_stopped_answer_and_leaves_a_finished_one_alone(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    pcat = pinned(cat)
+    recon, _ = recon_to_review(m, 1)
+    hank = f"hank:review-match:{recon}"
+    m.run(recon, pcat)
+    answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, review_runtime("contest"))
+    hid, rid = m.d.paperclip_id(hank), m.d.paperclip_id(recon)
+    # the run stopped after its facts: the hank issue still open, the work issue still blocked
+    m.pc.issues[hid]["status"] = "in_progress"
+    m.pc.issues[rid].update(status="blocked", blockedByIssueIds=[hid])
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+    assert m.pc.issues[hid]["status"] == "done"
+    assert m.pc.issues[rid]["status"] == "todo" and m.pc.issues[rid]["blockedByIssueIds"] == []
+    # the work issue moved on to a person's card: a replay now leaves it there
+    assert m.run(recon, pcat).ended == "ask:recon_review_contest"
+    before = dict(m.pc.issues[rid])
+    patches = [c for c in m.pc.calls if c[0] == "PATCH"]
+    assert answer_hank(pcat, ROOT, m.d, m.pc, m.co, "review-match", recon, never_runs) is None
+    assert m.pc.issues[rid] == before
+    assert [c for c in m.pc.calls if c[0] == "PATCH"] == patches
 
 
 # ----- the month's Reconcile over acked Jobs (POST) -----
