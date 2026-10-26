@@ -503,8 +503,19 @@ def _period_diff(cat, d: Dossier, issue, facts, detail) -> dict:
 
 
 def _release_lock(cat, d: Dossier, issue, facts, detail) -> dict:
+    """reopen: the month is unlocked and the close runs again as its next round (``_round``).
+
+    The round makes each round's facts, and so its steps' keys and its questions (``round`` in
+    the question, ``kit.dispatch._question``), its own: a round that reaches the same state as
+    the one before is never a replay of it (P9)."""
     d.release_close(issue.split(":")[2])
-    return {"locked": False, "diffed": False, "suggested": False, "v2": None}
+    return {
+        "locked": False,
+        "diffed": False,
+        "suggested": False,
+        "v2": None,
+        "_round": facts.get("_round", 0) + 1,
+    }
 
 
 # ----- The calendar (WP-21) -----

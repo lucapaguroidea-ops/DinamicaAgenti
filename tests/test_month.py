@@ -763,8 +763,138 @@ def test_a_reopened_close_is_suggested_again(cat, tmp_path):
     second = answer_hank(pcat, ROOT, m.d, m.pc, m.co, "close-suggest", close, never_runs)
     assert second is not None and not second.ran and second.key != first.key
     assert m.d.facts(close)["suggested"] is True and m.d.facts(close)["_hank"] is None
-    assert m.run(close, pcat).steps[0] == "ask:v2_close"  # the route goes on past the suggestion
+    asked = m.run(close, pcat)  # the route goes on past the suggestion, to a person again
+    assert asked.ended == "ask:v2_close", asked.ended
     assert facts_rows(m, close, "hank:close-suggest:") == [first.key, second.key]
+    m.answer(close, action=["file"])
+    assert m.run(close, pcat).ended == "ask:v4_codit"
+
+
+def v2_cards(m: Month, close: str) -> list[dict]:
+    return [c for c in m.pc.cards[m.d.paperclip_id(close)] if c["title"].startswith("v2_close")]
+
+
+def card_question(c: dict) -> dict:
+    text = c["payload"]["questionSet"]["description"]
+    return json.loads(text.split("```json\n")[1].split("\n```")[0])
+
+
+@pytest.mark.law("P9", "P12")
+@pytest.mark.parametrize("pin", [True, False])
+def test_a_reopened_close_asks_v2_close_again_on_a_new_card(cat, tmp_path, pin):
+    m = Month(cat, tmp_path)
+    run_cat = pinned(cat) if pin else cat
+    acked_month(m)
+    close = f"close:{CUI}:{P}"
+    hank = f"hank:close-suggest:{close}"
+    outputs = {
+        "suggest.json": {"action": "file", "books_support_declaration": True, "reason": "x"},
+        "explain.json": {"explanation": "invented", "facts_cited": [], "missing": []},
+        "rule.json": {"rules": []},
+    }
+
+    def suggested(t):
+        if pin:
+            assert t.ended == f"wait:{hank}"
+            rt = fake_runtime(outputs)
+            answer_hank(run_cat, ROOT, m.d, m.pc, m.co, "close-suggest", close, rt)
+            t = m.run(close, run_cat)
+        return t
+
+    first = suggested(m.run(close, run_cat))
+    assert first.ended == "ask:v2_close"
+    assert card_question(v2_cards(m, close)[0]).get("round") is None  # round 0 reads as before
+    m.answer(close, action=["reopen"])
+    again = suggested(m.run(close, run_cat))
+    assert again.ended == "ask:v2_close", again.ended  # never "answered; not wired"
+    assert m.d.facts(close)["suggested"] is True
+    cards = v2_cards(m, close)
+    assert len(cards) == 2 and cards[0]["id"] != cards[1]["id"]
+    assert cards[1]["status"] == "pending" and card_question(cards[1])["round"] == 1
+    assert m.run(close, run_cat).ended == "wait:v2_close"  # a retried tick: no second card
+    assert len(v2_cards(m, close)) == 2
+    m.answer(close, action=["hold"])
+    held = m.run(close, run_cat)
+    assert held.ended == "hold: the person held the month"
+    assert m.run(close, run_cat).ended == "hold: the person held the month"
+    assert len(v2_cards(m, close)) == 2  # the round's answered question is never asked twice
+    assert [a["answer"]["action"] for a in m.d.answers(close) if a["kind"] == "v2_close"] == [
+        "reopen",
+        "hold",
+    ]
+
+
+@pytest.mark.law("P9")
+def test_a_reopened_close_reopened_twice_runs_a_third_round(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    acked_month(m)
+    close = f"close:{CUI}:{P}"
+    assert m.run(close).ended == "ask:v2_close"
+    for n in (1, 2):
+        m.answer(close, action=["reopen"])
+        t = m.run(close)
+        assert t.steps[:2] == ["answered:v2_close", "kit:release_lock"], t.steps
+        assert t.ended == "ask:v2_close", t.ended
+        assert card_question(v2_cards(m, close)[-1])["round"] == n
+    m.answer(close, action=["file"])
+    assert m.run(close).ended == "ask:v4_codit"
+    assert card_question(m.card(close))["round"] == 2  # every close question names its round
+
+
+@pytest.mark.law("P9")
+def test_an_answered_question_of_the_round_is_not_asked_again(cat, tmp_path):
+    from kit.dispatch import _ask
+    from kit.route import _ask as ask_step
+
+    m = Month(cat, tmp_path)
+    acked_month(m)
+    close = f"close:{CUI}:{P}"
+    m.run(close)
+    m.answer(close, action=["reopen"])
+    m.run(close)
+    stale = m.d.facts(close)  # round 1's facts, read before its answer was taken in
+    m.answer(close, action=["hold"])
+    m.run(close)
+    pid = ensure_issue(m.d, m.pc, m.co, close)
+    stale = {**stale, "_card": None}
+    t = _ask(cat, m.d, close, pid, m.pc, m.co, ask_step("v2_close"), stale, Tick(close))
+    assert t.ended == "hold: v2_close is answered; applying it is not wired yet"
+    assert len(v2_cards(m, close)) == 2
+
+
+@pytest.mark.law("P9", "P10")
+def test_a_second_unpinned_review_on_one_recon_is_its_own_refusal(cat, tmp_path):
+    m = Month(cat, tmp_path)
+    recon, ids = recon_to_review(m, 2)
+    first, second = ids
+    m.d.add_facts(recon, "to-review-1", "kit", {"to_review": [first]})
+    assert m.run(recon).ended == "ask:recon_review_contest"
+    m.answer(recon, action=["override_absent"])
+    assert m.run(recon).ended == "done:clear"
+    m.d.add_facts(recon, "to-review-2", "kit", {"to_review": [second]})
+    t = m.run(recon)  # the refusal's body differs from the first: never a StoreError
+    assert t.ended == "ask:recon_review_contest", t.ended
+    assert m.d.facts(recon)["contested"] == [second]
+    assert len(facts_rows(m, recon, "refusal:review-match:")) == 2
+
+
+@pytest.mark.law("P10")
+def test_a_refusal_that_cannot_be_written_holds_the_issue(cat, tmp_path, monkeypatch):
+    from kit.store import Dossier, StoreError
+
+    m = Month(cat, tmp_path)
+    recon, _ = recon_to_review(m, 1)
+    real = Dossier.add_facts
+
+    def refuse(self, issue, key, source, fields):
+        if key.startswith("refusal:"):
+            raise StoreError(f"{issue}: facts {key!r} are already written, differently")
+        return real(self, issue, key, source, fields)
+
+    monkeypatch.setattr(Dossier, "add_facts", refuse)
+    t = m.run(recon)
+    assert t.ended.startswith("hold: review-match: the refusal cannot be written: ")
+    assert m.pc.issues[m.d.paperclip_id(recon)]["assigneeUserId"] == "user-acc"
 
 
 @pytest.mark.law("P9")

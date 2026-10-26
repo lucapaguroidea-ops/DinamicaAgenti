@@ -190,9 +190,11 @@ def dispatch(
             refused = _hank(cat, repo, step, facts)
             if refused is None:
                 return _hand_off(cat, d, pc, co, issue, pid, step, facts, tick)
-            d.add_facts(
-                issue, f"refusal:{step.name}:{facts.get('read_runs', 0)}", "refusal", refused
-            )
+            try:
+                _refuse(d, issue, step.name, refused)
+            except StoreError as exc:
+                why = f"{step.name}: the refusal cannot be written: {exc}"
+                return _hold(pc, pid, co, tick, why)
             pc.request(
                 "POST",
                 f"/api/issues/{pid}/comments",
@@ -224,6 +226,20 @@ def _hank(cat: Catalog, repo: Path, step: Step, facts: dict) -> dict | None:
         except HankRefused:
             return REFUSALS[step.name](facts)
     return None
+
+
+def _refuse(d: Dossier, issue: str, hank: str, fields: dict) -> str:
+    """An unpinned hank's refusal facts, each refusal of a hank on an issue its own fact.
+
+    The key is numbered by the refusals of that hank already written on the issue (``#n``), as
+    a hand-off is (``_hand_off``): a second refusal (the next job to review, a reopened close's
+    suggestion) is a new fact, never a no-op on an equal body nor a clash with a different one.
+    It is deterministic: the number is read from the dossier, and a refusal moves the route off
+    the hank, so a retried tick never reaches it again (P9). Returns the key written."""
+    n = len(d.fact_keys(issue, f"refusal:{hank}:"))
+    key = f"refusal:{hank}:#{n}"
+    d.add_facts(issue, key, "refusal", fields)
+    return key
 
 
 def hank_issue(hank: str, issue: str) -> str:
@@ -395,12 +411,17 @@ def _hold(pc: Client, pid: str, co: Company, tick: Tick, reason: str) -> Tick:
 def _question(d: Dossier, issue: str, step: Step, facts: dict) -> dict:
     """The question as asked: its kind, the route's detail, what the steps wrote for it, and
     what its check needs from the dossier now (``CONTEXT``). The kind is part of the question,
-    so two kinds asked on the same facts are two questions, with two hashes."""
+    so two kinds asked on the same facts are two questions, with two hashes. A close's question
+    carries its round (``round``, the reopens before it; absent in the first round): a round
+    after a reopen asks again what the round before answered, while within one round an
+    answered question is never asked twice (``_asked_before``)."""
     q = {"issue": issue, **step.detail, **facts.get(f"_ask:{step.name}", {})}
     if step.name in CONTEXT:
         q.update({k: v for k, v in CONTEXT[step.name](d, issue, facts).items() if v is not None})
     if step.name == "define_articol" and q.get("candidates"):
         q["choices"] = {"articol_id": list(q["candidates"])}
+    if issue.startswith("close:") and facts.get("_round"):
+        q["round"] = facts["_round"]  # a reopened close asks its questions anew (P9)
     q["kind"] = step.name
     return q
 

@@ -188,7 +188,8 @@ A close run, never a Job. Blocked by the month's Reconcile issue while a PRE que
    every control.
 3. **Suggestion (hank).** `close-suggest` may suggest an action; it never clears material.
 4. **Q `v2_close`.** `file` | `hold` | `patch_maps` | `reopen` (+ explained rule). `file` refused
-   while material; `reopen` releases the lock.
+   while material; `reopen` releases the lock and the close runs again as its next round: each
+   round's questions carry the round, so the person is asked anew, never twice within a round.
 5. **After file, Q `v4_codit`.** `accept` xor `skip`; accept may patch only allowed axes (auto,
    SAF-T, exig) and seed next month's (tax, VAT); never overwrites an existing next CO.DiT.
 6. **Filings.** One item per declaration the CO.DiT requires, gated by its controls; SAGA
