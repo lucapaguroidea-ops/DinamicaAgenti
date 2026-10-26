@@ -37,25 +37,28 @@ whole.
 duplicate id in every catalog, every reference to a row that does not exist, an articol with no
 path, an alias pin, YAML that does not parse or is not a mapping, an unknown catalog, two base
 files, an additive file with no base, the other side's catalog, a deprecated row but a model
-role). The rows: 570 of 706 field positions of the shared rows; two of six shared axes.
+role). The rows: 560 of 706 field positions of the shared rows; two of six shared axes.
 
 **Live paths.** Every kit caller loads ``catalog/`` with ``load_catalog`` and reads rows through
 ``Catalog.get`` and ``ids``; both sides load their own catalog, so no refusal case is on a live
 path: each is a guard on a file the owner edits. Every one of the eleven catalogs is read by some
 kit module; ``LIVE`` names the fields read, bracketed by what the five invented firms' months and
-every hank's check read through the rows and by every field a reading module names. On those
-fields 427 of 515 positions agree; the 88 that differ are in the source documents (29), articole
-(14), mouths (4, doc_class), profiles (7), close kinds (1), controls (27), filings (4) and question
-kinds (2). Off the live paths: a Job kind's articole, a profile's review and sink_source, a
-filing's form, books gate, closer and certainty, a mouth's fields but doc_class, and the status of
-any row but an articol.
+every hank's check read through the rows (which never reach ``kit/hankrun.py``) and by every field
+a reading module names, the rows a kit function returns to its importer included (so a model
+role's ``system``, read by ``hankrun.agent_for``). On those fields 417 of 515 positions agree; the
+98 that differ are in the source documents (29), articole (24, ten of them ``valid_from``, which
+the kit's matcher reads on its rows and the core's on its rows only, where it has none: probed, an
+invoice of 2025-12-15 binds on the core's side only), mouths (4, doc_class), profiles (7), close
+kinds (1), controls (27), filings (4) and question kinds (2). Off the live paths: a Job kind's
+articole, a profile's review and sink_source, a filing's form, books gate, closer and certainty, a
+mouth's fields but doc_class, and the status of any row but an articol.
 
 **Vacuity.** No row on either side is active or deprecated (the kit's 105 rows are all draft; the
 core's are draft but for its 8 filings and 27 question kinds, which carry no status, and its model
 roles, wired or shadow), so the rows never exercise the status lifecycle (P14): the invented rows
-do, each side accepting and refusing a status. 194 of the 570 agreeing positions (185 of the 427
-live) agree only empty against empty; a mutation that sets a kit field the core leaves empty is
-caught (BUILD WP-20).
+do, each side accepting and refusing a status. 194 of the 560 agreeing positions (185 of the 417
+live) agree only empty against empty; a field set on the kit's side where the core leaves it empty
+is still caught (a standing probe; the throwaway mutations are in BUILD WP-20).
 
 **What it does not prove**, because neither catalog nor the invented rows exercise it: the core's
 checks with no kit counterpart (a graph's allowed articole and questions, an articol in both Flux
@@ -728,7 +731,7 @@ FIELDS: dict[str, tuple[tuple[str, object], ...]] = {
         ("reconcile.match_keys", "reconcile.match_keys"),
         ("reconcile.expect_accounts", "reconcile.expect_accounts"),
         ("reconcile.tolerance", "reconcile.tolerance"),
-        ("valid_from", lambda r, c: r.get("valid_from") or c.docs["ArticoleFlux"]["valid_from"]),
+        ("valid_from", "valid_from"),
         ("valid_to", "valid_to"),
         ("status", "status"),
     ),
@@ -847,23 +850,30 @@ def _ids() -> dict[str, tuple[list[str], list[str], list[str]]]:
     return out
 
 
+def _row_diffs(kind: str, kid: str, krow, crow) -> dict[str, tuple]:
+    """One shared row: ``<id>.<field>`` → (the kit's value, the core's) where they differ."""
+    diffs = {}
+    for kf, cf in FIELDS[kind]:
+        k = _dig(krow, kf)
+        k = VIEW.get((kind, kf), lambda v: v)(k) if k is not None else None
+        if kind == "SourceDoc" and kf == "our_role_default" and _dig(crow, cf) == "either":
+            c = None  # the core's child_pack reads "either" as none (the sorting step)
+        else:
+            c = _core_value(kind, crow, cf)
+        if _norm(k) != _norm(c):
+            diffs[f"{kid}.{kf}"] = (_norm(k), _norm(c))
+    return diffs
+
+
 @cache
 def _field_diffs() -> dict[str, dict[str, tuple]]:
     """Per catalog, ``<id>.<field>`` → (the kit's value, the core's) where shared rows differ."""
     out: dict[str, dict[str, tuple]] = {}
-    for kind, specs in FIELDS.items():
+    for kind in FIELDS:
         diffs = {}
         for kid in _ids()[kind][0]:
             krow, crow = _kcat().get(kind, kid), _core_rows(kind)[_core_id(kind, kid)]
-            for kf, cf in specs:
-                k = _dig(krow, kf)
-                k = VIEW.get((kind, kf), lambda v: v)(k) if k is not None else None
-                if kind == "SourceDoc" and kf == "our_role_default" and _dig(crow, cf) == "either":
-                    c = None  # the core's child_pack reads "either" as none (the sorting step)
-                else:
-                    c = _core_value(kind, crow, cf)
-                if _norm(k) != _norm(c):
-                    diffs[f"{kid}.{kf}"] = (_norm(k), _norm(c))
+            diffs |= _row_diffs(kind, kid, krow, crow)
         out[kind] = diffs
     return out
 
@@ -891,7 +901,7 @@ def _one_side_fields() -> dict[str, tuple[list[str], list[str]]]:
 
 # The core's fields a derived comparison reads.
 DERIVED_FROM = {
-    "Articol": {"graph_id", "valid_from"},
+    "Articol": {"graph_id"},
     "Mouth": set(),
     "CloseKind": {"recon_flux"},
     "Filing": {"books_gate"},
@@ -1027,6 +1037,8 @@ def _row_tag(kind: str, key: str) -> str:
         return "status_by_row"
     if kind == "ReconcileProfile" and key.endswith(".review"):
         return "reconcile_profile_review"
+    if kind == "Articol" and key.endswith(".valid_from"):
+        return "articol_valid_from"
     return ROW_TAGS[kind]
 
 
@@ -1092,10 +1104,30 @@ def _core_only_catalogs() -> list[str]:
 # ----- the declared gaps, (the kit's, the core's) -----
 
 
+# The ten articole both sides carry.
+SHARED_ARTICOLE = (
+    "bon_cu_cui",
+    "bon_fara_cui",
+    "extras_statement",
+    "foreign_invoice_inbound",
+    "foreign_invoice_outbound",
+    "foreign_rc_neplatitor",
+    "ro_efactura_inbound",
+    "ro_efactura_outbound",
+    "storno_iesire",
+    "storno_intrare",
+)
+
 PARITY_GAPS: dict[str, tuple[object, object]] = {
     # ----- the loader -----
     # status active with no owner's approval on the row: the kit refuses it (P14), the core takes it
-    # (its ModelRole refuses active as outside its vocabulary, which agrees).
+    # (its ModelRole refuses active as outside its vocabulary, which agrees). The core enforces
+    # LAW L42 at build time through its surface gate (surface.py:227-228, a row active but not
+    # proven in SAGA C is a problem; asserted by tests/test_scenarios.py:170, the proof being
+    # surface/evidence/ files with an owner-dated approval), not in its run-time loader; the kit
+    # enforces the approval at load time but not the SAGA round trip. Each enforces half: the
+    # core's run-time loader and matcher would take an active row from a hand-edited catalog.
+    # L42 does not cover model roles (no active status; no table of the surface gate).
     "active_without_approval": (
         {"status_active_unapproved: refused": 9},
         {"status_active_unapproved: accepted": 9},
@@ -1241,7 +1273,7 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
     ),
     # ----- the rows -----
     # The ten shared articole, field by field (the core's filters split into filters and
-    # extra_filters; its valid_from is its file's).
+    # extra_filters; their valid_from is articol_valid_from).
     "articol_rows": (
         {
             "bon_cu_cui.filters.our_role": "inbound",
@@ -1286,6 +1318,15 @@ PARITY_GAPS: dict[str, tuple[object, object]] = {
             "storno_iesire.reconcile.expect_accounts": ["4111"],
             "storno_intrare.reconcile.expect_accounts": ["401"],
         },
+    ),
+    # The ten shared articole's start: the kit's rows carry valid_from 2026-01-01, which its
+    # matcher reads (kit/bind.py); the core's rows carry none, and its matcher reads only the
+    # row's own (flux.py _in_range, _rank), not its file's, so its articole bind on any earlier
+    # day too (probed: a ro_efactura inbound invoice of 2025-12-15 binds on the core's side
+    # only).
+    "articol_valid_from": (
+        {f"{a}.valid_from": "2026-01-01" for a in SHARED_ARTICOLE},
+        {f"{a}.valid_from": None for a in SHARED_ARTICOLE},
     ),
     # close_standard requires tva_091 too in the core, a value the kit's vocabulary has not
     # (axis_vocabulary).
@@ -1850,7 +1891,9 @@ def test_each_declared_gap_still_holds_exactly(gap: str) -> None:
 # Per catalog, the row fields some kit module other than catalog.py reads (bind, sorting, steps,
 # recon, period, questions, cards, dispatch, hanks, hankrun, scenario, cli). Bracketed by two
 # observations below: what the five invented firms' months and every hank's check read through
-# the rows, and every field a module that reads the catalog names as an attribute.
+# the rows (a lower bound: it never reaches kit/hankrun.py, whose agent_for reads a model role's
+# system), and every field a module that reads the catalog names as an attribute, following the
+# rows a kit function returns to the module that imports it (an upper bound).
 LIVE: dict[str, set[str]] = {
     "Axis": {"values"},
     "SourceDoc": {
@@ -1891,15 +1934,37 @@ LIVE: dict[str, set[str]] = {
     "Control": {"epsilon", "layer", "require", "severity", "watched"},
     "Filing": {"forbid", "require"},
     "QuestionKind": {"actor", "answer", "procedure"},
-    "ModelRole": {"answer", "card", "codon", "hank", "model", "output", "tier"},
+    "ModelRole": {"answer", "card", "codon", "hank", "model", "output", "system", "tier"},
 }
 
 
-def _static_reads() -> dict[str, set[str]]:
-    """Every row field a kit module that reads a catalog names as an attribute (a superset: the
-    name may be another object's attribute)."""
+def _row_returning() -> dict[tuple[str, str], set[str]]:
+    """(kit module, function) → the catalogs whose row class its return annotation names: how a
+    module hands rows to another (``kit.hanks.roles_for`` → ``ModelRoleRow`` for
+    ``kit/hankrun.py``)."""
     import ast
 
+    out: dict[tuple[str, str], set[str]] = {}
+    for path in sorted((ROOT / "kit").glob("*.py")):
+        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.returns is not None:
+                ann = ast.unparse(n.returns)
+                kinds = {k for k, m in kc.CATALOGS.items() if m.__name__ in ann}
+                if kinds:
+                    out[(f"kit.{path.stem}", n.name)] = kinds
+    return out
+
+
+def _static_reads() -> dict[str, set[str]]:
+    """Every row field a kit module that reads a catalog names as an attribute: a module reads a
+    catalog when it calls ``get`` / ``ids`` on it by name, names its row class, or imports a kit
+    function whose return annotation names the row class (rows handed from module to module).
+    An upper bound on what is read through rows (the name may be another object's attribute),
+    as far as a function that hands rows on annotates them: one returning rows unannotated
+    would escape it, and the runtime recording below is the check on that."""
+    import ast
+
+    returning = _row_returning()
     out: dict[str, set[str]] = {k: set() for k in kc.CATALOGS}
     for path in sorted((ROOT / "kit").glob("*.py")):
         if path.name == "catalog.py":
@@ -1916,6 +1981,13 @@ def _static_reads() -> dict[str, set[str]]:
             and isinstance(n.args[0], ast.Constant)
             and n.args[0].value in kc.CATALOGS
         } | {k for k, m in kc.CATALOGS.items() if m.__name__ in src}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom) and n.module:
+                for a in n.names:
+                    kinds |= returning.get((n.module, a.name), set())
+        for (module, _), ks in returning.items():
+            if module == f"kit.{path.stem}":
+                kinds |= ks
         attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         for k in kinds:
             out[k] |= set(kc.CATALOGS[k].model_fields) & attrs
@@ -2016,21 +2088,21 @@ def test_the_loaders_agree_outside_the_declared_gaps() -> None:
 
 
 def test_the_rows_agree_outside_the_declared_gaps_overall_and_live() -> None:
-    """Field positions on the shared rows: 570 of 706 agree, 427 of 515 on the fields the kit
+    """Field positions on the shared rows: 560 of 706 agree, 417 of 515 on the fields the kit
     reads; every difference is a declared gap (tagged by catalog)."""
     assert _row_agreement() == {
         "all positions": 706,
-        "all agree": 570,
+        "all agree": 560,
         "all agree empty on both": 194,
         "live positions": 515,
-        "live agree": 427,
+        "live agree": 417,
         "live agree empty on both": 185,
     }
     live = {kind: sum(_live(kind, k) for k in d) for kind, d in _field_diffs().items()}
     assert live == {
         "SourceDoc": 29,
         "JobKind": 0,
-        "Articol": 14,
+        "Articol": 24,
         "Mouth": 4,
         "ReconcileProfile": 7,
         "CloseKind": 1,
@@ -2047,10 +2119,15 @@ def test_the_rows_agree_outside_the_declared_gaps_overall_and_live() -> None:
 
 def test_the_live_fields_are_what_the_kit_reads(tmp_path) -> None:
     """``LIVE`` lies between what the invented months and the hank checks read and every field a
-    catalog-reading module names."""
+    catalog-reading module names, rows handed on by a kit function included: the static bound
+    reaches ``kit/hankrun.py`` through ``kit.hanks.roles_for``, and so a model role's
+    ``system``, which ``agent_for`` reads and the recording never reaches."""
     recorded, static = _recorded_reads(tmp_path), _static_reads()
     for kind in kc.CATALOGS:
         assert recorded[kind] - NOT_COMPARED <= LIVE[kind] <= static[kind], kind
+    assert _row_returning()[("kit.hanks", "roles_for")] == {"ModelRole"}
+    assert "system" in LIVE["ModelRole"] & static["ModelRole"]
+    assert "system" not in recorded["ModelRole"]
     # read by no module: the profile's review and sink_source, a filing's form, books gate,
     # closer and certainty, a Job kind's articole, a mouth's every field but doc_class
     unread = {k: sorted(set(_fields_of(k)) - LIVE[k]) for k in FIELDS}
@@ -2062,11 +2139,45 @@ def _fields_of(kind: str) -> list[str]:
     return [kf.split(".")[0] for kf, _ in FIELDS[kind]]
 
 
+def test_an_articol_binds_before_2026_on_the_cores_side_only() -> None:
+    """``articol_valid_from``, run through each side's own matcher: a ro_efactura inbound
+    invoice dated 2025-12-15 binds nothing on the kit's side (its row starts 2026-01-01) and
+    ``ro_efactura_inbound`` on the core's (its row has no start; the file's ``valid_from`` is
+    not read by the matcher); dated 2026-01-15, both bind it."""
+    from kit.bind import candidates
+
+    assert list(SHARED_ARTICOLE) == _ids()["Articol"][0]
+
+    def kit_binds(day: str) -> list[str]:
+        return candidates(_kcat(), "ro_efactura", "inbound", False, {}, day, allow_draft=True)
+
+    def core_binds(day: str) -> list[str]:
+        ctx = core.MatchContext(
+            graph_id="ingest_source_doc",
+            fiscal_class="ro_efactura",
+            our_role="inbound",
+            is_storno=False,
+            day=day,
+        )
+        return core.match_articole(_ccat(), ctx, allow_draft=True)
+
+    assert (kit_binds("2025-12-15"), core_binds("2025-12-15")) == ([], ["ro_efactura_inbound"])
+    assert kit_binds("2026-01-15") == core_binds("2026-01-15") == ["ro_efactura_inbound"]
+
+
 def test_vacuity_is_pinned_and_probed() -> None:
     """No row is active or deprecated on either side, so the rows never exercise the status
     lifecycle (P14): the invented rows do, each side accepting and refusing a status. 194 of the
-    570 agreeing positions are empty on both (185 of 427 live): a probe sets each kit field the
-    core writes and is caught (mutations, reported in BUILD)."""
+    560 agreeing positions are empty on both (185 of 417 live): a field agreeing empty against
+    empty is still compared, which the standing probe shows (``needs_client_on_doc`` set on a
+    copy of a row where both sides leave it empty is caught); the throwaway mutations of
+    ``kit/catalog.py`` are reported in BUILD."""
+    kid = "bon_fiscal"
+    krow, crow = _kcat().get("SourceDoc", kid), _core_rows("SourceDoc")[kid]
+    key = f"{kid}.needs_client_on_doc"
+    assert key not in _row_diffs("SourceDoc", kid, krow, crow)
+    probe = krow.model_copy(update={"needs_client_on_doc": True})
+    assert _row_diffs("SourceDoc", kid, probe, crow)[key] == (True, None)
     mine, theirs = _statuses_in_use()
     assert {s for c in mine.values() for s in c} == {"draft"}
     assert theirs["Filing"] == {"none": 8} and theirs["QuestionKind"] == {"none": 27}
